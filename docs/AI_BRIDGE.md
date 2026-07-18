@@ -14,16 +14,16 @@ architecture, and worked examples.
 .\build_uch.ps1        # builds BIE5_Mono and ILRepack-merges everything into ONE dll
 # copy Release\UnityExplorer.BepInEx5.Mono\UnityExplorer.BIE5.Mono.dll to <game>\BepInEx\plugins\
 
-dotnet run --project mcp-proxy -c Release    # keep the always-on proxy running (port 7312)
+dotnet run --project mcp-proxy -c Release    # keep the always-on proxy running (port 7310)
 ```
 
 Register your agent against the **proxy** (survives game restarts, can launch the game itself):
 
-- Claude Code: `claude mcp add --transport http uch-game http://127.0.0.1:7312/mcp`
+- Claude Code: `claude mcp add --transport http uch-game http://127.0.0.1:7310/mcp`
 - Codex (`~/.codex/config.toml`):
   ```toml
   [mcp_servers.uch-game]
-  url = "http://127.0.0.1:7312/mcp"
+  url = "http://127.0.0.1:7310/mcp"
   ```
 
 Direct REST access (any tool, curl, no MCP needed) is always available on the game's own
@@ -34,7 +34,7 @@ port: `curl http://127.0.0.1:7311/` lists endpoints, `/docs` the full reference.
 ```
 Agent (MCP or curl)
    │
-   ├── mcp-proxy  :7312   always-on; hides game downtime, launches/kills the game,
+   ├── mcp-proxy  :7310   always-on; hides game downtime, launches/kills the game,
    │        │             routes _port to instances, serves postmortem from disk
    │        ▼
    └── AIBridgeServer  :7311, 7313, 7314, ...   (one per game instance, first free port)

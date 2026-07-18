@@ -198,13 +198,14 @@ messages only appear if the "Log Unity Debug" config option is enabled.
 
 ## Multiple instances (networked-mod testing)
 
-Each game instance binds the first free port in `[7311, 7327)` (the proxy's 7312 is
-skipped automatically), so you can run many instances — host + up to 7 clients tested.
+Each game instance binds the first free port in `[7311, 7327)` — host on 7311,
+clients on 7312, 7313, ... — so you can run many instances (host + up to 7 clients
+tested). The proxy sits just below the range on 7310.
 `GET /` includes an `instance` identity: port, pid, steamName, and a wall-clock `utc`.
 Log entries and observer events also carry `utc` timestamps so you can correlate
 "host sent X" / "client received X" across instances.
 
-Via the proxy (port 7312), use `list_instances` to enumerate running instances and
+Via the proxy (port 7310), use `list_instances` to enumerate running instances and
 pass `_port` on any game tool to target a specific one. `launch_game(count)`,
 `kill_game` and `postmortem` (disk log tails, works when the game is dead) are
 served by the proxy itself. `launch_game` refuses to start if the mod DLL is

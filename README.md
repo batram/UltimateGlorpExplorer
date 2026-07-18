@@ -32,7 +32,7 @@ Claude Code, Codex & friends can use the running game as a tool server:
 - **Single-DLL build**: [`build_uch.ps1`](build_uch.ps1) → one merged `UnityExplorer.BIE5.Mono.dll`.
 
 ```
-claude mcp add --transport http uch-game http://127.0.0.1:7312/mcp
+claude mcp add --transport http uch-game http://127.0.0.1:7310/mcp
 ```
 
 📖 **Full guide with setup, architecture and worked examples: [docs/AI_BRIDGE.md](docs/AI_BRIDGE.md)**

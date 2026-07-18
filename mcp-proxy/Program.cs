@@ -11,13 +11,14 @@ using System.Threading.Tasks;
 
 // Always-on MCP proxy for the UCH AI bridge, multi-instance aware.
 //
-// Clients register http://127.0.0.1:7312/mcp. Game instances bind the first free
+// Clients register http://127.0.0.1:7310/mcp (just below the game port range, so
+// instances number contiguously from 7311). Game instances bind the first free
 // port in [7311+? no: BASE_UPSTREAM..+16); the proxy scans that range and routes
 // each tools/call to a specific instance via an injected optional "_port" argument.
 // The proxy also answers four tools itself (they work with zero instances running):
 //   list_instances, launch_game, kill_game, postmortem
 
-const int ListenPort = 7312;
+const int ListenPort = 7310;
 const int UpstreamBasePort = 7311;
 const int UpstreamPortRange = 16;
 
