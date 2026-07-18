@@ -15,46 +15,25 @@
 
 ## What's different in this fork
 
-- **AI bridge** — a localhost HTTP JSON API embedded in the game (`http://127.0.0.1:7311`, port configurable):
-  - `GET /scene` — live scene hierarchy
-  - `GET /inspect?path=...` / `?type=...` — GameObject state and type signatures
-  - `POST /execute` — run C# in the game via the REPL console
-  - `GET /logs` — log tail with cursor polling
-  - `GET /docs` — the bridge serves its own API documentation
-- **MCP (Modded Chicken Protocol)** server at `POST /mcp` — coincidentally wire-compatible with Anthropic's
-  [Model Context Protocol](https://modelcontextprotocol.io) (Streamable HTTP, stateless), so Claude Code,
-  Codex, Cursor & friends can use the game as a tool server directly:
-  ```
-  claude mcp add --transport http uch-game http://127.0.0.1:7312/mcp
-  ```
-- **Downtime-hiding proxy** ([`mcp-proxy/`](mcp-proxy/)) — tiny always-on .NET app on port `7312` that forwards
-  to the game and keeps MCP clients happy while the game is closed or restarting (cached tool list, clean
-  "game is not running" tool errors). Register clients against `7312`; use `7311` only if the game is always up.
-- **Single-DLL build** — [`build_uch.ps1`](build_uch.ps1) produces one ILRepack-merged
-  `UnityExplorer.BIE5.Mono.dll` (UniverseLib, mcs, Tomlet, Newtonsoft.Json included).
+An **AI bridge** embedded in the game, plus **MCP (Modded Chicken Protocol)** — coincidentally
+wire-compatible with Anthropic's [Model Context Protocol](https://modelcontextprotocol.io) — so
+Claude Code, Codex & friends can use the running game as a tool server:
 
-## Quickstart
+- **20 agent tools**: scene exploration, object/singleton search, live inspection (by path,
+  type, instance id, or screen pixel), a persistent C# REPL, Harmony method hooks with call
+  tracing, per-frame watch/observers with an event buffer, blocking `wait_for`, screenshots,
+  freecam, and cursored logs — all self-documented at `GET /docs` by the running game.
+- **Always-on proxy** ([`mcp-proxy/`](mcp-proxy/)): hides game downtime from MCP clients and
+  adds lifecycle tools — `launch_game`, `kill_game`, `list_instances`, crash `postmortem`.
+- **Multi-instance support** for networked-mod testing: run host + many clients, target each
+  via `_port`, correlate across instances with wall-clock timestamps.
+- **Single-DLL build**: [`build_uch.ps1`](build_uch.ps1) → one merged `UnityExplorer.BIE5.Mono.dll`.
 
-```powershell
-# build the single DLL
-.\build_uch.ps1
-
-# deploy (adjust path): copy Release\UnityExplorer.BepInEx5.Mono\UnityExplorer.BIE5.Mono.dll
-#   into <game>\BepInEx\plugins\
-
-# keep the proxy running
-dotnet run --project mcp-proxy -c Release
+```
+claude mcp add --transport http uch-game http://127.0.0.1:7312/mcp
 ```
 
-Launch the game, then poke it:
-
-```bash
-curl http://127.0.0.1:7311/docs                      # full API docs, served by the game
-curl "http://127.0.0.1:7311/scene?depth=1"
-curl -X POST --data 'UnityEngine.Time.timeScale = 0.5f;' http://127.0.0.1:7311/execute
-```
-
-See [notes/ai_bridge_usage.md](notes/ai_bridge_usage.md) for the full agent-facing guide.
+📖 **Full guide with setup, architecture and worked examples: [docs/AI_BRIDGE.md](docs/AI_BRIDGE.md)**
 
 Only the **BepInEx 5 Mono** target is maintained in this fork; everything below is inherited from upstream.
 All credit for UnityExplorer itself goes to [sinai-dev](https://github.com/sinai-dev) — powered by
