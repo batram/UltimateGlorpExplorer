@@ -78,6 +78,11 @@
         <AssemblyName>UnityExplorer.STANDALONE.IL2CPP</AssemblyName>
     </PropertyGroup>
 
+    <!-- ~~~~~ EMBEDDED RESOURCES ~~~~~ -->
+    <ItemGroup>
+        <EmbeddedResource Include="AIBridge\BridgeDocs.md" />
+    </ItemGroup>
+
     <!-- ~~~~~ NUGET ~~~~~ -->
     <ItemGroup>
         <PackageReference Include="HarmonyX" Version="2.5.2" IncludeAssets="compile" />

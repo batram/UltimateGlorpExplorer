@@ -217,6 +217,63 @@ namespace UnityExplorer.CSConsole
             }
         }
 
+        public struct EvalResult
+        {
+            public bool Ok;
+            public string Result;
+            public string Error;
+        }
+
+        // Like Evaluate(string, bool), but returns the REPL result / compiler errors
+        // instead of writing them to the log. Used by the AI bridge.
+        public static EvalResult EvaluateCapture(string input)
+        {
+            if (SRENotSupported || Evaluator == null)
+                return new EvalResult { Ok = false, Error = "C# console is not available (System.Reflection.Emit not supported, or console not initialized yet)." };
+
+            if (evaluatorStringWriter == null || evaluatorOutput == null)
+            {
+                GenerateTextWriter();
+                Evaluator._textWriter = evaluatorStringWriter;
+            }
+
+            try
+            {
+                CompiledMethod repl = Evaluator.Compile(input);
+
+                if (repl != null)
+                {
+                    try
+                    {
+                        object ret = null;
+                        repl.Invoke(ref ret);
+                        return new EvalResult { Ok = true, Result = ret?.ToString() };
+                    }
+                    catch (Exception ex)
+                    {
+                        return new EvalResult { Ok = false, Error = $"Exception invoking REPL: {ex}" };
+                    }
+                }
+                else
+                {
+                    string output = Evaluator._textWriter.ToString();
+                    string[] outputSplit = output.Split('\n');
+                    if (outputSplit.Length >= 2)
+                        output = outputSplit[outputSplit.Length - 2];
+                    evaluatorOutput.Clear();
+
+                    if (ScriptEvaluator._reportPrinter.ErrorsCount > 0)
+                        return new EvalResult { Ok = false, Error = $"Unable to compile the code. Evaluator's last output was: {output}" };
+
+                    return new EvalResult { Ok = true, Result = "Code compiled without errors (no REPL return value)." };
+                }
+            }
+            catch (Exception ex)
+            {
+                return new EvalResult { Ok = false, Error = ex.ToString() };
+            }
+        }
+
         #endregion
 
 

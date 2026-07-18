@@ -76,6 +76,12 @@ namespace UnityExplorer.UI.Panels
             File.WriteAllLines(CurrentStreamPath, Logs.Select(it => it.message).ToArray());
         }
 
+        // Read access for the AI bridge
+
+        public static int LogCount => Logs.Count;
+
+        public static LogInfo GetLog(int index) => Logs[index];
+
         // Logging
 
         public static void Log(string message, LogType type)

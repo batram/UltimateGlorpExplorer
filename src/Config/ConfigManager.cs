@@ -26,6 +26,7 @@ namespace UnityExplorer.Config
         public static ConfigElement<KeyCode> World_MouseInspect_Keybind;
         public static ConfigElement<KeyCode> UI_MouseInspect_Keybind;
         public static ConfigElement<string> CSConsole_Assembly_Blacklist;
+        public static ConfigElement<int> AI_Bridge_Port;
         public static ConfigElement<string> Reflection_Signature_Blacklist;
 
         // internal configs
@@ -133,6 +134,11 @@ namespace UnityExplorer.Config
                 "Separate each Assembly with a semicolon ';'." +
                 "For example, to blacklist Assembly-CSharp, you would add 'Assembly-CSharp;'",
                 "");
+
+            AI_Bridge_Port = new("AI Bridge Port",
+                "Localhost port for the AI bridge HTTP server (lets external AI agents inspect and script the game). " +
+                "Set to 0 to disable. Requires restart to take effect.",
+                7311);
 
             Reflection_Signature_Blacklist = new("Member Signature Blacklist",
                 "Use this to blacklist certain member signatures if they are known to cause a crash or other issues.\r\n" +

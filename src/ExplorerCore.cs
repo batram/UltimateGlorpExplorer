@@ -70,11 +70,26 @@ namespace UnityExplorer
 
             Log($"{NAME} {VERSION} ({Universe.Context}) initialized.");
 
+#if MONO
+            try
+            {
+                AIBridge.AIBridgeServer.Init();
+            }
+            catch (Exception ex)
+            {
+                LogWarning($"Exception starting AI Bridge: {ex}");
+            }
+#endif
+
             // InspectorManager.Inspect(typeof(Tests.TestClass));
         }
 
         internal static void Update()
         {
+#if MONO
+            AIBridge.MainThreadDispatcher.Drain();
+#endif
+
             // check master toggle
             if (InputManager.GetKeyDown(ConfigManager.Master_Toggle.Value))
             {
