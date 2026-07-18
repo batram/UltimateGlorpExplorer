@@ -76,6 +76,9 @@ Config: "AI Bridge Port" in `BepInEx\config\com.sinai.unityexplorer.cfg` (0 disa
 BepInEx doorstop (`winhttp.dll`) is missing/disabled, the UnityExplorer DLL is absent from
 `BepInEx\plugins`, or the AI bridge port is set to 0 in the config — and it warns (but still
 launches) when the deployed DLL is older than the repo's last build, i.e. you forgot to redeploy.
+Its optional `args` string array is passed unchanged to every launched game process; arguments
+containing spaces do not need manual quoting. For example:
+`launch_game {count: 1, args: ["-screen-width", "1280", "-screen-height", "720"]}`.
 
 ## Worked examples
 

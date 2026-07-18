@@ -154,6 +154,7 @@ async Task HandleToolCallAsync(HttpListenerContext ctx, JsonNode req, JsonNode i
             {
                 int count = (int?)args["count"]?.GetValue<double>() ?? 1;
                 count = Math.Clamp(count, 1, 8);
+                JsonArray commandLineArgs = args["args"] as JsonArray ?? new JsonArray();
                 if (!File.Exists(gameExe))
                 {
                     await RespondAsync(ctx, 200, RpcResult(id, ToolResult($"Game exe not found: {gameExe} (set UCH_DIR env var).", true)).ToJsonString());
@@ -168,7 +169,19 @@ async Task HandleToolCallAsync(HttpListenerContext ctx, JsonNode req, JsonNode i
                 List<int> pids = new();
                 for (int i = 0; i < count; i++)
                 {
-                    Process p = Process.Start(new ProcessStartInfo { FileName = gameExe, WorkingDirectory = gameDir, UseShellExecute = true });
+                    ProcessStartInfo startInfo = new()
+                    {
+                        FileName = gameExe,
+                        WorkingDirectory = gameDir,
+                        UseShellExecute = true,
+                    };
+                    foreach (JsonNode argument in commandLineArgs)
+                    {
+                        if (argument != null)
+                            startInfo.ArgumentList.Add(argument.GetValue<string>());
+                    }
+
+                    Process p = Process.Start(startInfo);
                     pids.Add(p.Id);
                     if (count > 1)
                         await Task.Delay(1500); // stagger so port scan order is deterministic
@@ -293,7 +306,16 @@ async Task HandleToolsListAsync(HttpListenerContext ctx, JsonNode id, string bod
     tools.Add(ProxyTool("launch_game",
         "Launch 1-8 Ultimate Chicken Horse instances (for networked testing launch several; each gets its own bridge port). " +
         "Bridges come up ~5-15s later; poll list_instances.",
-        new JsonObject { ["count"] = new JsonObject { ["type"] = "integer", ["description"] = "Instances to launch (default 1, max 8)." } }));
+        new JsonObject
+        {
+            ["count"] = new JsonObject { ["type"] = "integer", ["description"] = "Instances to launch (default 1, max 8)." },
+            ["args"] = new JsonObject
+            {
+                ["type"] = "array",
+                ["items"] = new JsonObject { ["type"] = "string" },
+                ["description"] = "Command-line arguments passed to every launched game instance.",
+            },
+        }));
     tools.Add(ProxyTool("kill_game",
         "Kill game process(es). Without pid, kills ALL running instances. Use before redeploying the mod DLL (the file is locked while any instance runs).",
         new JsonObject { ["pid"] = new JsonObject { ["type"] = "integer", ["description"] = "Specific pid (from list_instances identity). Optional." } }));

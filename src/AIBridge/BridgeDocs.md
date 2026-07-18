@@ -211,7 +211,10 @@ pass `_port` on any game tool to target a specific one. `launch_game(count)`,
 served by the proxy itself. `launch_game` refuses to start if the mod DLL is
 missing from `BepInEx\plugins`, BepInEx's doorstop is absent/disabled, or the
 bridge port is configured to 0 — and warns when the deployed DLL is older than
-the repo's last build (forgot to redeploy). Kill all instances before redeploying the mod DLL —
+the repo's last build (forgot to redeploy). Its optional `args` string array is passed
+unchanged to every launched game process. For example:
+`launch_game {count: 1, args: ["-screen-width", "1280", "-screen-height", "720"]}`.
+Kill all instances before redeploying the mod DLL —
 the file is locked while any instance runs.
 
 **Restart resilience:** hooks and observers are in-memory and lost on restart.
