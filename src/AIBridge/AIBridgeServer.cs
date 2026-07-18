@@ -89,6 +89,12 @@ namespace UnityExplorer.AIBridge
                                 "GET /scene?depth=N&max=N - scene hierarchy",
                                 "GET /inspect?path=<GameObject/path> - component fields/properties of a GameObject",
                                 "GET /inspect?type=<TypeName> - member signatures of a type",
+                                "GET /inspect?id=<instanceID> - inspect any UnityEngine.Object by instance id",
+                                "GET /search?mode=object|singleton|class&name=&type=&limit=N - find objects, singletons or classes",
+                                "GET /hooks | POST /hooks/create | GET /hooks/toggle?sig= | GET /hooks/delete?sig= - Harmony method hooks",
+                                "POST /watch?frames=N - body is a C# expression, sampled once per frame",
+                                "GET /inspect_at?x=&y= - world raycast at normalized screen coords (top-left origin)",
+                                "GET /freecam?enabled=&x=&y=&z= - toggle/position the free camera",
                                 "POST /execute - body is raw C#, evaluated in the REPL",
                                 "GET /logs?since=N - log entries from index N",
                                 "GET /screenshot?max=N - PNG screenshot of the game (max = optional max dimension, 0 = full)",
@@ -114,14 +120,126 @@ namespace UnityExplorer.AIBridge
                     {
                         string goPath = ctx.Request.QueryString["path"];
                         string typeName = ctx.Request.QueryString["type"];
-                        if (string.IsNullOrEmpty(goPath) && string.IsNullOrEmpty(typeName))
+                        string idRaw = ctx.Request.QueryString["id"];
+                        if (string.IsNullOrEmpty(goPath) && string.IsNullOrEmpty(typeName) && string.IsNullOrEmpty(idRaw))
                         {
-                            TryRespond(ctx, 400, Error("Provide either ?path=<GameObject/path> or ?type=<TypeName>."));
+                            TryRespond(ctx, 400, Error("Provide ?path=<GameObject/path>, ?type=<TypeName> or ?id=<instanceID>."));
+                            return;
+                        }
+                        object result = MainThreadDispatcher.Run(() =>
+                        {
+                            if (!string.IsNullOrEmpty(idRaw) && int.TryParse(idRaw, out int id))
+                                return InspectById(id);
+                            if (!string.IsNullOrEmpty(goPath))
+                                return InspectGameObject(goPath);
+                            return InspectType(typeName);
+                        }, DISPATCH_TIMEOUT_MS);
+                        TryRespond(ctx, 200, result);
+                        return;
+                    }
+
+                case "/search":
+                    {
+                        string mode = ctx.Request.QueryString["mode"] ?? "object";
+                        string name = ctx.Request.QueryString["name"];
+                        string type = ctx.Request.QueryString["type"];
+                        int limit = ParseIntParam(ctx, "limit", 50);
+                        object result = MainThreadDispatcher.Run(() => BridgeTools.SearchObjects(mode, name, type, limit), DISPATCH_TIMEOUT_MS);
+                        TryRespond(ctx, 200, result);
+                        return;
+                    }
+
+                case "/hooks":
+                    {
+                        object result = MainThreadDispatcher.Run(BridgeTools.ListHooks, DISPATCH_TIMEOUT_MS);
+                        TryRespond(ctx, 200, result);
+                        return;
+                    }
+
+                case "/hooks/create":
+                    {
+                        // POST JSON: { "type": "...", "method": "...", "param_types": [...]?, "patch_code": "..."? }
+                        if (ctx.Request.HttpMethod != "POST")
+                        {
+                            TryRespond(ctx, 405, Error("Use POST with a JSON body: { type, method, param_types?, patch_code? }"));
+                            return;
+                        }
+                        string body;
+                        using (StreamReader reader = new(ctx.Request.InputStream, ctx.Request.ContentEncoding ?? Encoding.UTF8))
+                            body = reader.ReadToEnd();
+                        Newtonsoft.Json.Linq.JObject json = Newtonsoft.Json.Linq.JObject.Parse(body);
+                        string hookType = json.Value<string>("type");
+                        string hookMethod = json.Value<string>("method");
+                        string[] paramTypes = (json["param_types"] as Newtonsoft.Json.Linq.JArray)?.Select(t => t.ToString()).ToArray();
+                        string patchCode = json.Value<string>("patch_code");
+                        if (string.IsNullOrEmpty(hookType) || string.IsNullOrEmpty(hookMethod))
+                        {
+                            TryRespond(ctx, 400, Error("'type' and 'method' are required."));
                             return;
                         }
                         object result = MainThreadDispatcher.Run(
-                            () => !string.IsNullOrEmpty(goPath) ? InspectGameObject(goPath) : InspectType(typeName),
-                            DISPATCH_TIMEOUT_MS);
+                            () => BridgeTools.CreateHook(hookType, hookMethod, paramTypes, patchCode), DISPATCH_TIMEOUT_MS);
+                        TryRespond(ctx, 200, result);
+                        return;
+                    }
+
+                case "/hooks/toggle":
+                case "/hooks/delete":
+                    {
+                        string sig = ctx.Request.QueryString["sig"];
+                        if (string.IsNullOrEmpty(sig))
+                        {
+                            TryRespond(ctx, 400, Error("Provide ?sig=<hook signature> (from GET /hooks)."));
+                            return;
+                        }
+                        bool toggle = path == "/hooks/toggle";
+                        object result = MainThreadDispatcher.Run(
+                            () => toggle ? BridgeTools.ToggleHook(sig) : BridgeTools.DeleteHook(sig), DISPATCH_TIMEOUT_MS);
+                        TryRespond(ctx, 200, result);
+                        return;
+                    }
+
+                case "/watch":
+                    {
+                        // POST body = C# expression; ?frames=N (default 60, max 600)
+                        if (ctx.Request.HttpMethod != "POST")
+                        {
+                            TryRespond(ctx, 405, Error("Use POST with the C# expression as the request body."));
+                            return;
+                        }
+                        string expression;
+                        using (StreamReader reader = new(ctx.Request.InputStream, ctx.Request.ContentEncoding ?? Encoding.UTF8))
+                            expression = reader.ReadToEnd();
+                        int frames = ParseIntParam(ctx, "frames", 60);
+                        int watchTimeout = Math.Max(DISPATCH_TIMEOUT_MS, frames * 100 + 5000);
+                        object result = BridgeTools.Watch(expression, frames, watchTimeout);
+                        TryRespond(ctx, 200, result);
+                        return;
+                    }
+
+                case "/inspect_at":
+                    {
+                        string xRaw = ctx.Request.QueryString["x"];
+                        string yRaw = ctx.Request.QueryString["y"];
+                        if (!float.TryParse(xRaw, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float x)
+                            || !float.TryParse(yRaw, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float y))
+                        {
+                            TryRespond(ctx, 400, Error("Provide ?x=&y= as normalized 0..1 coordinates from the top-left (same orientation as /screenshot)."));
+                            return;
+                        }
+                        object result = MainThreadDispatcher.Run(() => BridgeTools.InspectAt(x, y), DISPATCH_TIMEOUT_MS);
+                        TryRespond(ctx, 200, result);
+                        return;
+                    }
+
+                case "/freecam":
+                    {
+                        bool enabled = ctx.Request.QueryString["enabled"] != "false" && ctx.Request.QueryString["enabled"] != "0";
+                        float? px = null, py = null, pz = null;
+                        if (float.TryParse(ctx.Request.QueryString["x"], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float fx)) px = fx;
+                        if (float.TryParse(ctx.Request.QueryString["y"], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float fy)) py = fy;
+                        if (float.TryParse(ctx.Request.QueryString["z"], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float fz)) pz = fz;
+                        object result = MainThreadDispatcher.Run(() => BridgeTools.Freecam(enabled, px, py, pz), DISPATCH_TIMEOUT_MS);
                         TryRespond(ctx, 200, result);
                         return;
                     }
@@ -212,6 +330,29 @@ namespace UnityExplorer.AIBridge
                 });
             }
 
+            // HideAndDontSave pseudo-scene: objects with that flag plus loose Assets/Resources.
+            // Placed last so the node cap prefers real scenes.
+            {
+                List<object> roots = new();
+                foreach (UnityEngine.Object obj in RuntimeHelper.FindObjectsOfTypeAll(typeof(GameObject)))
+                {
+                    if (nodeCount >= maxNodes)
+                    {
+                        truncated = true;
+                        break;
+                    }
+                    GameObject go = obj.TryCast<GameObject>();
+                    if (go == null || go.transform.parent != null || go.scene.IsValid())
+                        continue;
+                    roots.Add(BuildNode(go.transform, maxDepth, maxNodes, ref nodeCount, ref truncated));
+                }
+                scenes.Add(new Dictionary<string, object>
+                {
+                    { "name", "HideAndDontSave" },
+                    { "rootObjects", roots },
+                });
+            }
+
             return new Dictionary<string, object>
             {
                 { "ok", true },
@@ -236,6 +377,7 @@ namespace UnityExplorer.AIBridge
             Dictionary<string, object> node = new()
             {
                 { "name", go.name },
+                { "id", go.GetInstanceID() },
                 { "active", go.activeSelf },
                 { "components", components },
                 { "childCount", transform.childCount },
@@ -269,7 +411,33 @@ namespace UnityExplorer.AIBridge
             GameObject go = ResolveGameObject(path);
             if (go == null)
                 return Error($"No GameObject found at path '{path}'.");
+            return InspectGameObjectCore(go);
+        }
 
+        internal static object InspectById(int id)
+        {
+            UnityEngine.Object obj = BridgeTools.FindObjectById(id);
+            if (obj == null)
+                return Error($"No UnityEngine.Object found with instance id {id}.");
+
+            if (obj.TryCast<GameObject>() is GameObject go)
+                return InspectGameObjectCore(go);
+
+            Dictionary<string, object> result = new()
+            {
+                { "ok", true },
+                { "name", obj.name },
+                { "id", obj.GetInstanceID() },
+                { "type", obj.GetActualType().FullName },
+                { "members", DumpInstanceMembers(obj, obj.GetActualType()) },
+            };
+            if (obj.TryCast<Component>() is Component comp && comp.gameObject)
+                result.Add("gameObjectPath", GetGameObjectPath(comp.transform));
+            return result;
+        }
+
+        static object InspectGameObjectCore(GameObject go)
+        {
             List<object> components = new();
             foreach (Component comp in go.GetComponents<Component>())
             {
@@ -277,22 +445,11 @@ namespace UnityExplorer.AIBridge
                     continue;
 
                 Type type = comp.GetType();
-                List<object> members = new();
-
-                foreach (FieldInfo field in type.GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
-                    members.Add(DescribeValueMember("field", field.Name, field.FieldType, () => field.GetValue(comp)));
-
-                foreach (PropertyInfo prop in type.GetProperties(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
-                {
-                    if (prop.GetIndexParameters().Length > 0 || !prop.CanRead)
-                        continue;
-                    members.Add(DescribeValueMember("property", prop.Name, prop.PropertyType, () => prop.GetValue(comp, null)));
-                }
-
                 components.Add(new Dictionary<string, object>
                 {
                     { "type", type.FullName },
-                    { "members", members },
+                    { "id", comp.GetInstanceID() },
+                    { "members", DumpInstanceMembers(comp, type) },
                 });
             }
 
@@ -300,12 +457,30 @@ namespace UnityExplorer.AIBridge
             {
                 { "ok", true },
                 { "name", go.name },
+                { "id", go.GetInstanceID() },
                 { "path", GetGameObjectPath(go.transform) },
                 { "active", go.activeSelf },
                 { "layer", LayerMask.LayerToName(go.layer) },
                 { "tag", go.tag },
                 { "components", components },
             };
+        }
+
+        static List<object> DumpInstanceMembers(object instance, Type type)
+        {
+            List<object> members = new();
+
+            foreach (FieldInfo field in type.GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
+                members.Add(DescribeValueMember("field", field.Name, field.FieldType, () => field.GetValue(instance)));
+
+            foreach (PropertyInfo prop in type.GetProperties(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
+            {
+                if (prop.GetIndexParameters().Length > 0 || !prop.CanRead)
+                    continue;
+                members.Add(DescribeValueMember("property", prop.Name, prop.PropertyType, () => prop.GetValue(instance, null)));
+            }
+
+            return members;
         }
 
         static object DescribeValueMember(string kind, string name, Type type, Func<object> getValue)
@@ -404,7 +579,7 @@ namespace UnityExplorer.AIBridge
             return null;
         }
 
-        static string GetGameObjectPath(Transform transform)
+        internal static string GetGameObjectPath(Transform transform)
         {
             string path = transform.name;
             while (transform.parent != null)

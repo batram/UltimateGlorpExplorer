@@ -12,8 +12,9 @@ game state and execute C# inside the running game.
   MCP registration:
   - Claude Code: `claude mcp add --transport http uch-game http://127.0.0.1:7311/mcp`
   - Codex (`~/.codex/config.toml`): `[mcp_servers.uch-game]` / `url = "http://127.0.0.1:7311/mcp"`
-  - MCP tools: `get_scene`, `inspect_gameobject`, `inspect_type`, `execute_csharp`, `screenshot`, `get_logs`
-    (parameters mirror the REST endpoints below).
+  - MCP tools: `get_scene`, `inspect_gameobject`, `inspect_type`, `inspect_id`, `find_objects`,
+    `execute_csharp`, `create_hook`, `list_hooks`, `toggle_hook`, `delete_hook`, `watch`,
+    `inspect_at`, `freecam`, `screenshot`, `get_logs` (parameters mirror the REST endpoints below).
 
 ## Endpoints
 
@@ -79,6 +80,52 @@ string.Join("\n", all.Select(p => p.name).ToArray())
 
 // Harmony patching works (HarmonyLib is loaded); keep patch classes unique per session
 ```
+
+### GET /search — find objects, singletons, classes
+`curl "http://127.0.0.1:7311/search?mode=singleton&name=Manager&limit=20"`
+
+- `mode=object` (default): live UnityEngine.Objects, filter by `name` substring and/or `type`.
+  Results include `path` and instance `id`.
+- `mode=singleton`: classes with a live static Instance field — the fastest way to find
+  game managers/entry points.
+- `mode=class`: type names across all loaded assemblies.
+
+### GET /inspect?id=N — inspect by instance id
+Every scene node, search result and component now carries a Unity instance `id`.
+`?id=` inspects any UnityEngine.Object unambiguously (paths break on duplicate names).
+
+### Hooks — Harmony method patching
+```
+curl "http://127.0.0.1:7311/hooks"                          # list
+curl -X POST --data '{"type":"PlayerCharacterController","method":"Jump"}' http://127.0.0.1:7311/hooks/create
+curl "http://127.0.0.1:7311/hooks/toggle?sig=<signature>"   # enable/disable
+curl "http://127.0.0.1:7311/hooks/delete?sig=<signature>"   # remove
+```
+Without `patch_code`, a default Postfix is generated that logs every call (instance,
+args, return value) to the log — instant call tracing, read it via `/logs`.
+With `patch_code`, supply C# method(s) named `Prefix` (bool or void), `Postfix`,
+`Finalizer` and/or `Transpiler` to change behavior. `param_types` (array of parameter
+type names) disambiguates overloads. Hooks persist until deleted and also appear in
+UnityExplorer's Hooks panel.
+
+### POST /watch — per-frame expression sampling
+`curl -X POST --data 'Time.timeScale' "http://127.0.0.1:7311/watch?frames=120"`
+
+Body = single C# expression (no trailing `;`). Compiled once, evaluated every frame
+for N frames (default 60, max 600); returns `{frame, time, value}` samples.
+
+### GET /inspect_at — what's at this pixel?
+`curl "http://127.0.0.1:7311/inspect_at?x=0.5&y=0.5"`
+
+World Physics.Raycast at normalized screen coordinates, 0..1 from the **top-left**
+(same orientation as screenshots, resolution-independent). Returns the hit
+GameObject's name/path/id/components. Colliders only — UI elements are not hit.
+
+### GET /freecam — camera control
+`curl "http://127.0.0.1:7311/freecam?enabled=true&x=10&y=5&z=-20"`
+
+Enables UnityExplorer's free camera (optionally at a world position) — useful for
+framing screenshots of specific areas. `enabled=false` restores the game camera.
 
 ### GET /screenshot — see the game
 `curl -o shot.png "http://127.0.0.1:7311/screenshot?max=1280"`

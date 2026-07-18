@@ -154,6 +154,88 @@ namespace UnityExplorer.AIBridge
                         ["code"] = Prop("string", "Raw C# code to evaluate."),
                     }, "code"),
 
+                Tool("find_objects",
+                    "Search the running game for objects. mode='object' (default): live UnityEngine.Objects by name substring and/or type; " +
+                    "mode='singleton': classes with a live Instance field (great for finding managers); mode='class': type names. " +
+                    "Results include instance ids usable with inspect_id.",
+                    new JObject
+                    {
+                        ["name"] = Prop("string", "Name filter (substring, case-insensitive). Optional."),
+                        ["type"] = Prop("string", "UnityEngine.Object-derived type filter for mode=object, e.g. 'PlayerCharacterController'. Optional."),
+                        ["mode"] = Prop("string", "'object' (default), 'singleton', or 'class'."),
+                        ["limit"] = Prop("integer", "Max results (default 50)."),
+                    }),
+
+                Tool("inspect_id",
+                    "Inspect any UnityEngine.Object by its instance id (from get_scene, find_objects or inspect_gameobject results). " +
+                    "Unambiguous alternative to path addressing when names are duplicated.",
+                    new JObject
+                    {
+                        ["id"] = Prop("integer", "Unity instance id."),
+                    }, "id"),
+
+                Tool("create_hook",
+                    "Attach a Harmony hook to a method. Without patch_code, a default Postfix is generated that logs every call " +
+                    "with instance, arguments and return value to the log (read via get_logs) — instant call tracing. " +
+                    "With patch_code, provide C# method(s) named Prefix (bool or void), Postfix, Finalizer and/or Transpiler, " +
+                    "e.g. 'static void Prefix(ref float __0) { __0 *= 2f; }'. Hooks persist until deleted.",
+                    new JObject
+                    {
+                        ["type"] = Prop("string", "Declaring type name."),
+                        ["method"] = Prop("string", "Method name."),
+                        ["param_types"] = new JObject
+                        {
+                            ["type"] = "array",
+                            ["items"] = new JObject { ["type"] = "string" },
+                            ["description"] = "Parameter type names to disambiguate overloads. Optional.",
+                        },
+                        ["patch_code"] = Prop("string", "Custom patch source. Optional (default = call logger)."),
+                    }, "type", "method"),
+
+                Tool("list_hooks",
+                    "List active/inactive Harmony hooks with their signatures and patch source.",
+                    new JObject()),
+
+                Tool("toggle_hook",
+                    "Enable/disable a hook by signature (from list_hooks or create_hook).",
+                    new JObject { ["signature"] = Prop("string", "Hook signature.") }, "signature"),
+
+                Tool("delete_hook",
+                    "Unpatch and remove a hook by signature.",
+                    new JObject { ["signature"] = Prop("string", "Hook signature.") }, "signature"),
+
+                Tool("watch",
+                    "Evaluate a C# expression once per frame for N frames and return the sampled values with timestamps. " +
+                    "Ideal for physics/movement debugging (e.g. a player's velocity during a jump). " +
+                    "Expression must be a single expression without trailing ';'.",
+                    new JObject
+                    {
+                        ["expression"] = Prop("string", "C# expression to sample, e.g. 'UnityEngine.Object.FindObjectOfType<Rigidbody2D>().velocity'."),
+                        ["frames"] = Prop("integer", "Number of frames to sample (default 60, max 600)."),
+                    }, "expression"),
+
+                Tool("inspect_at",
+                    "World-physics raycast at a screen position: 'what object is at this pixel?'. " +
+                    "Coordinates are normalized 0..1 from the TOP-LEFT, matching screenshot orientation " +
+                    "(so a point at the center of a screenshot is x=0.5, y=0.5 regardless of resolution). " +
+                    "Only hits colliders; UI elements are not found.",
+                    new JObject
+                    {
+                        ["x"] = Prop("number", "0..1 from left."),
+                        ["y"] = Prop("number", "0..1 from top."),
+                    }, "x", "y"),
+
+                Tool("freecam",
+                    "Enable/disable UnityExplorer's free camera, optionally setting its world position. " +
+                    "Useful to frame screenshots of specific areas. Disable when done to restore the game camera.",
+                    new JObject
+                    {
+                        ["enabled"] = Prop("boolean", "true to enable, false to restore the game camera."),
+                        ["x"] = Prop("number", "World position X. Optional."),
+                        ["y"] = Prop("number", "World position Y. Optional."),
+                        ["z"] = Prop("number", "World position Z. Optional."),
+                    }, "enabled"),
+
                 Tool("screenshot",
                     "Take a PNG screenshot of the game window (captured after rendering). " +
                     "Use this to see the current visual state of the game. " +
@@ -210,6 +292,77 @@ namespace UnityExplorer.AIBridge
                             if (string.IsNullOrEmpty(code))
                                 return RpcError(id, -32602, "Missing required argument 'code'.");
                             result = MainThreadDispatcher.Run(() => AIBridgeServer.ExecuteCode(code), AIBridgeServer.DISPATCH_TIMEOUT_MS);
+                            break;
+                        }
+                    case "find_objects":
+                        {
+                            string mode = args.Value<string>("mode") ?? "object";
+                            string nameFilter = args.Value<string>("name");
+                            string typeFilter = args.Value<string>("type");
+                            int limit = args.Value<int?>("limit") ?? 50;
+                            result = MainThreadDispatcher.Run(() => BridgeTools.SearchObjects(mode, nameFilter, typeFilter, limit), AIBridgeServer.DISPATCH_TIMEOUT_MS);
+                            break;
+                        }
+                    case "inspect_id":
+                        {
+                            int? objId = args.Value<int?>("id");
+                            if (objId == null)
+                                return RpcError(id, -32602, "Missing required argument 'id'.");
+                            result = MainThreadDispatcher.Run(() => AIBridgeServer.InspectById(objId.Value), AIBridgeServer.DISPATCH_TIMEOUT_MS);
+                            break;
+                        }
+                    case "create_hook":
+                        {
+                            string hookType = args.Value<string>("type");
+                            string hookMethod = args.Value<string>("method");
+                            if (string.IsNullOrEmpty(hookType) || string.IsNullOrEmpty(hookMethod))
+                                return RpcError(id, -32602, "Missing required arguments 'type' and/or 'method'.");
+                            string[] paramTypes = (args["param_types"] as JArray)?.Select(t => t.ToString()).ToArray();
+                            string patchCode = args.Value<string>("patch_code");
+                            result = MainThreadDispatcher.Run(() => BridgeTools.CreateHook(hookType, hookMethod, paramTypes, patchCode), AIBridgeServer.DISPATCH_TIMEOUT_MS);
+                            break;
+                        }
+                    case "list_hooks":
+                        result = MainThreadDispatcher.Run(BridgeTools.ListHooks, AIBridgeServer.DISPATCH_TIMEOUT_MS);
+                        break;
+                    case "toggle_hook":
+                    case "delete_hook":
+                        {
+                            string sig = args.Value<string>("signature");
+                            if (string.IsNullOrEmpty(sig))
+                                return RpcError(id, -32602, "Missing required argument 'signature'.");
+                            bool toggle = name == "toggle_hook";
+                            result = MainThreadDispatcher.Run(() => toggle ? BridgeTools.ToggleHook(sig) : BridgeTools.DeleteHook(sig), AIBridgeServer.DISPATCH_TIMEOUT_MS);
+                            break;
+                        }
+                    case "watch":
+                        {
+                            string expression = args.Value<string>("expression");
+                            if (string.IsNullOrEmpty(expression))
+                                return RpcError(id, -32602, "Missing required argument 'expression'.");
+                            int frames = args.Value<int?>("frames") ?? 60;
+                            int watchTimeout = Math.Max(AIBridgeServer.DISPATCH_TIMEOUT_MS, frames * 100 + 5000);
+                            result = BridgeTools.Watch(expression, frames, watchTimeout);
+                            break;
+                        }
+                    case "inspect_at":
+                        {
+                            float? x = args.Value<float?>("x");
+                            float? y = args.Value<float?>("y");
+                            if (x == null || y == null)
+                                return RpcError(id, -32602, "Missing required arguments 'x' and/or 'y'.");
+                            result = MainThreadDispatcher.Run(() => BridgeTools.InspectAt(x.Value, y.Value), AIBridgeServer.DISPATCH_TIMEOUT_MS);
+                            break;
+                        }
+                    case "freecam":
+                        {
+                            bool? enabled = args.Value<bool?>("enabled");
+                            if (enabled == null)
+                                return RpcError(id, -32602, "Missing required argument 'enabled'.");
+                            float? fx = args.Value<float?>("x");
+                            float? fy = args.Value<float?>("y");
+                            float? fz = args.Value<float?>("z");
+                            result = MainThreadDispatcher.Run(() => BridgeTools.Freecam(enabled.Value, fx, fy, fz), AIBridgeServer.DISPATCH_TIMEOUT_MS);
                             break;
                         }
                     case "screenshot":
