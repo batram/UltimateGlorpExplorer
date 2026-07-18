@@ -1,74 +1,76 @@
-# AI Bridge for UnityExplorer (UCH / Mono only)
+# AI Bridge architecture (UCH / Mono only) — as built
 
-HTTP JSON API embedded in UnityExplorer so an external AI agent (Claude Code / codex)
-can inspect and script a running UCH instance. Target: **BIE5_Mono only** (.NET 3.5,
-BepInEx 5). Other build configs are out of scope.
+HTTP JSON API + MCP server embedded in UnityExplorer so external AI agents
+(Claude Code / Codex) can inspect and script a running UCH instance.
+Target: **BIE5_Mono only** (.NET 3.5, BepInEx 5). All bridge code is `#if MONO`.
 
 ## Architecture
 
 ```
-Claude Code (curl / optional stdio MCP bridge)
-        │  HTTP JSON, localhost
-        ▼
-AIBridgeServer (HttpListener, background thread)
-        │  request queue
-        ▼
-MainThreadDispatcher  ← drained from ExplorerCore.Update()
-        │
-        ├─ SceneHandler          (scene hierarchy)
-        ├─ ReflectionUtility     (inspect, UniverseLib)
-        ├─ ConsoleController     (C# REPL eval)
-        └─ LogPanel              (log access)
+Claude Code / Codex ──MCP (Streamable HTTP)──► mcp-proxy (:7312, always on)
+        │                                          │ forwards; hides game downtime
+        │ curl (REST)                              ▼
+        └────────────────────────────► AIBridgeServer (:7311, HttpListener,
+                                       background thread, in-game)
+                                                │  request queue
+                                                ▼
+                                     MainThreadDispatcher ◄─ drained from
+                                                │            ExplorerCore.Update()
+                                                ├─ SceneHandler / scene walk
+                                                ├─ ReflectionUtility (UniverseLib)
+                                                ├─ ConsoleController.EvaluateCapture
+                                                └─ LogPanel accessors
 ```
 
-## New code: `src/AIBridge/`
+## Components (`src/AIBridge/`)
 
-### AIBridgeServer.cs
-- `System.Net.HttpListener` on `http://127.0.0.1:<port>/` (net35-safe, no extra deps).
-- Port + enable flag via `ConfigManager` (default off, or on with fixed port — decide at impl).
-- Background thread accepts requests, enqueues work item, blocks (with timeout ~5s)
-  until main thread completes, writes JSON response.
-- Start from end of `ExplorerCore.LateInit()` (src/ExplorerCore.cs).
+- **AIBridgeServer.cs** — `HttpListener` on `http://127.0.0.1:<port>/`
+  (config "AI Bridge Port", default 7311, 0 = disabled), started from
+  `ExplorerCore.LateInit()`. Routes:
+  - `GET /` endpoint index · `GET /docs` embedded BridgeDocs.md (markdown)
+  - `GET /scene?depth&max` · `GET /inspect?path=|type=` · `POST /execute` · `GET /logs?since`
+  - `POST /mcp` → McpEndpoint
+  - Shared internal handlers (BuildSceneTree, InspectGameObject, InspectType,
+    ExecuteCode, GetLogs) are used by both REST and MCP.
+- **McpEndpoint.cs** — minimal MCP server, Streamable HTTP transport
+  (JSON-RPC 2.0 on POST, stateless, no SSE): initialize / notifications (202) /
+  ping / tools/list / tools/call. Five tools mirroring the REST endpoints:
+  get_scene, inspect_gameobject, inspect_type, execute_csharp, get_logs.
+- **MainThreadDispatcher.cs** — lock+Queue (net35), drained once per frame in
+  `ExplorerCore.Update()`; HTTP thread blocks with 15s timeout.
+- **BridgeDocs.md** — agent-facing API docs, embedded resource, served at /docs.
+- JSON: **Newtonsoft.Json 13.0.3** (net35 build) for both directions
+  (the initial hand-rolled writer/parser was replaced).
 
-### MainThreadDispatcher.cs
-- Queue of pending requests (lock + Queue<T>, net35 — no ConcurrentQueue).
-- Drained in `ExplorerCore.Update()` (hook via ExplorerBehaviour update path).
-- Each item: delegate returning object, ManualResetEvent to signal HTTP thread.
+## Hooks into existing code
 
-### Json.cs
-- Minimal hand-rolled JSON writer (+ tiny parser for POST bodies). No Newtonsoft.
+- `ConsoleController.EvaluateCapture(string)` (src/CSConsole/ConsoleController.cs) —
+  REPL eval returning result/compiler errors instead of logging.
+- `LogPanel.LogCount` / `GetLog(int)` (src/UI/Panels/LogPanel.cs) — read access.
+- `ConfigManager.AI_Bridge_Port` (src/Config/ConfigManager.cs).
+- `ExplorerCore.LateInit()` starts the server; `ExplorerCore.Update()` drains the
+  dispatcher (src/ExplorerCore.cs).
 
-## Endpoints (v1)
+## mcp-proxy/ (separate always-on process)
 
-- `GET /scene?depth=N&max=N`
-  - `SceneHandler.LoadedScenes` / `CurrentRootObjects`, recursive transform walk.
-  - Per node: name, active, path, component type names, childCount. Depth/count
-    limits mandatory (UCH levels can be large).
-- `GET /inspect?path=<scene-path>` or `?type=<TypeName>`
-  - Resolve GameObject by hierarchy path or type via UniverseLib `ReflectionUtility`.
-  - Return fields/properties (name, type, value.ToString()), method signatures.
-  - Do NOT use InspectorManager (UI-coupled).
-- `POST /execute` (body = raw C# string)
-  - New `ConsoleController.EvaluateCapture(string)` variant based on existing
-    `Evaluate(string, bool)` (src/CSConsole/ConsoleController.cs:158):
-    capture return value + compiler errors via ScriptEvaluator's StringWriter /
-    report printer instead of ExplorerCore.Log. Return `{ ok, result, errors }`.
-- `GET /logs?since=N`
-  - Add public accessor for `LogPanel.Logs` (src/UI/Panels/LogPanel.cs, currently
-    private). Return entries with index, type, message; `since` = index cursor.
+.NET 6 console app, `http://127.0.0.1:7312/mcp` → forwards to 7311. When the game
+is down: answers initialize/ping itself, serves tools/list from `tools-cache.json`
+(captured while the game was up), returns clean "game not running" tool errors on
+tools/call. Stateless end-to-end, so game restarts are invisible to MCP clients.
+Register clients against 7312. Run: `dotnet run --project mcp-proxy -c Release`.
 
-## Client side
+## Build & deploy
 
-- Claude Code calls endpoints via curl; document examples in this folder.
-- Copy `UltimateChickenHorse_Data/Managed/Assembly-CSharp.dll` into the agent
-  workspace for static code context.
-- Optional later: thin Node/Python stdio→HTTP MCP bridge exposing the 4 endpoints
-  as MCP tools.
+- `.\build_uch.ps1` — builds BIE5_Mono, ILRepack-merges UniverseLib + mcs +
+  Tomlet + Newtonsoft.Json into a single `UnityExplorer.BIE5.Mono.dll`.
+- Deploy that one DLL to `<UCH>\BepInEx\plugins\` (close the game first — the
+  file is locked while it runs).
 
-## Verification
+## Verification (what was tested live)
 
-1. Build BIE5_Mono config, drop DLL into UCH `BepInEx/plugins/`, launch UCH.
-2. `curl http://127.0.0.1:<port>/scene` → hierarchy JSON.
-3. `curl -X POST --data 'UnityEngine.Debug.Log("hi");' .../execute` → ok, and
-   "hi" visible in `/logs`.
-4. Game stays responsive (one request handled per frame is acceptable).
+- REST: /scene, /inspect (path+type), /execute (REPL result round-trip),
+  /logs cursor, /docs.
+- MCP direct + via proxy: initialize handshake, tools/list, tools/call
+  (execute_csharp, get_scene), -32602 on unknown tool, notifications → 202.
+- Proxy downtime cycle: cache fill while up → game quit → cached tools/list +
+  friendly tool errors → relaunch → passthrough resumes.
