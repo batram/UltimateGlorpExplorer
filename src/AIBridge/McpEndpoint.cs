@@ -154,6 +154,15 @@ namespace UnityExplorer.AIBridge
                         ["code"] = Prop("string", "Raw C# code to evaluate."),
                     }, "code"),
 
+                Tool("screenshot",
+                    "Take a PNG screenshot of the game window (captured after rendering). " +
+                    "Use this to see the current visual state of the game. " +
+                    "Defaults to a downscaled image (max dimension 1280) to save tokens; pass max=0 for full resolution.",
+                    new JObject
+                    {
+                        ["max"] = Prop("integer", "Max width/height in pixels; image is scaled down to fit. 0 = full resolution (default 1280)."),
+                    }),
+
                 Tool("get_logs",
                     "Read the UnityExplorer log (incl. Unity Debug.Log if the 'Log Unity Debug' config is enabled, " +
                     "and output from your own execute_csharp Debug.Log calls). " +
@@ -202,6 +211,25 @@ namespace UnityExplorer.AIBridge
                                 return RpcError(id, -32602, "Missing required argument 'code'.");
                             result = MainThreadDispatcher.Run(() => AIBridgeServer.ExecuteCode(code), AIBridgeServer.DISPATCH_TIMEOUT_MS);
                             break;
+                        }
+                    case "screenshot":
+                        {
+                            int maxDim = args.Value<int?>("max") ?? 1280;
+                            byte[] png = (byte[])MainThreadDispatcher.RunAtEndOfFrame(
+                                () => AIBridgeServer.CaptureScreenshotPng(maxDim), AIBridgeServer.DISPATCH_TIMEOUT_MS);
+                            return RpcResult(id, new JObject
+                            {
+                                ["content"] = new JArray
+                                {
+                                    new JObject
+                                    {
+                                        ["type"] = "image",
+                                        ["data"] = Convert.ToBase64String(png),
+                                        ["mimeType"] = "image/png",
+                                    },
+                                },
+                                ["isError"] = false,
+                            });
                         }
                     case "get_logs":
                         {

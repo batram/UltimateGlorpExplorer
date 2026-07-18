@@ -12,7 +12,7 @@ game state and execute C# inside the running game.
   MCP registration:
   - Claude Code: `claude mcp add --transport http uch-game http://127.0.0.1:7311/mcp`
   - Codex (`~/.codex/config.toml`): `[mcp_servers.uch-game]` / `url = "http://127.0.0.1:7311/mcp"`
-  - MCP tools: `get_scene`, `inspect_gameobject`, `inspect_type`, `execute_csharp`, `get_logs`
+  - MCP tools: `get_scene`, `inspect_gameobject`, `inspect_type`, `execute_csharp`, `screenshot`, `get_logs`
     (parameters mirror the REST endpoints below).
 
 ## Endpoints
@@ -79,6 +79,14 @@ string.Join("\n", all.Select(p => p.name).ToArray())
 
 // Harmony patching works (HarmonyLib is loaded); keep patch classes unique per session
 ```
+
+### GET /screenshot — see the game
+`curl -o shot.png "http://127.0.0.1:7311/screenshot?max=1280"`
+
+Returns a PNG of the game window, captured after rendering. `max` = optional
+maximum width/height (image is scaled down to fit); omit or 0 for full
+resolution. Also available as the MCP tool `screenshot` (returns inline image
+content, default max 1280).
 
 ### GET /logs?since=N — UnityExplorer + Unity log tail
 `curl "http://127.0.0.1:7311/logs?since=120"`

@@ -4,6 +4,7 @@ using System.Net;
 using System.Text;
 using System.Threading;
 using UnityEngine.SceneManagement;
+using UniverseLib.Runtime;
 using UnityExplorer.Config;
 using UnityExplorer.CSConsole;
 using UnityExplorer.ObjectExplorer;
@@ -90,6 +91,7 @@ namespace UnityExplorer.AIBridge
                                 "GET /inspect?type=<TypeName> - member signatures of a type",
                                 "POST /execute - body is raw C#, evaluated in the REPL",
                                 "GET /logs?since=N - log entries from index N",
+                                "GET /screenshot?max=N - PNG screenshot of the game (max = optional max dimension, 0 = full)",
                             }
                         },
                     });
@@ -149,6 +151,14 @@ namespace UnityExplorer.AIBridge
                         int since = ParseIntParam(ctx, "since", 0);
                         object result = MainThreadDispatcher.Run(() => GetLogs(since), DISPATCH_TIMEOUT_MS);
                         TryRespond(ctx, 200, result);
+                        return;
+                    }
+
+                case "/screenshot":
+                    {
+                        int maxDim = ParseIntParam(ctx, "max", 0); // 0 = full resolution
+                        byte[] png = (byte[])MainThreadDispatcher.RunAtEndOfFrame(() => CaptureScreenshotPng(maxDim), DISPATCH_TIMEOUT_MS);
+                        TryRespondBytes(ctx, 200, "image/png", png);
                         return;
                     }
 
@@ -443,6 +453,54 @@ namespace UnityExplorer.AIBridge
             };
         }
 
+        // Must run at end of frame (MainThreadDispatcher.RunAtEndOfFrame).
+        internal static byte[] CaptureScreenshotPng(int maxDim)
+        {
+            Texture2D tex = new(Screen.width, Screen.height, TextureFormat.RGB24, false);
+            try
+            {
+                tex.ReadPixels(new Rect(0, 0, Screen.width, Screen.height), 0, 0);
+                tex.Apply(false, false);
+
+                if (maxDim > 0 && (tex.width > maxDim || tex.height > maxDim))
+                {
+                    Texture2D scaled = Downscale(tex, maxDim);
+                    UnityEngine.Object.Destroy(tex);
+                    tex = scaled;
+                }
+
+                string tmp = Path.Combine(Path.GetTempPath(), $"ue_aibridge_screenshot_{Guid.NewGuid():N}.png");
+                try
+                {
+                    TextureHelper.SaveTextureAsPNG(tex, tmp);
+                    return File.ReadAllBytes(tmp);
+                }
+                finally
+                {
+                    if (File.Exists(tmp))
+                        File.Delete(tmp);
+                }
+            }
+            finally
+            {
+                UnityEngine.Object.Destroy(tex);
+            }
+        }
+
+        static Texture2D Downscale(Texture2D src, int maxDim)
+        {
+            float scale = (float)maxDim / Mathf.Max(src.width, src.height);
+            int width = Mathf.Max(1, Mathf.RoundToInt(src.width * scale));
+            int height = Mathf.Max(1, Mathf.RoundToInt(src.height * scale));
+
+            Texture2D result = new(width, height, TextureFormat.RGB24, false);
+            for (int y = 0; y < height; y++)
+                for (int x = 0; x < width; x++)
+                    result.SetPixel(x, y, src.GetPixelBilinear((x + 0.5f) / width, (y + 0.5f) / height));
+            result.Apply(false, false);
+            return result;
+        }
+
         #endregion
 
 
@@ -477,6 +535,22 @@ namespace UnityExplorer.AIBridge
                 cachedDocs = $"Embedded documentation could not be loaded: {ex.Message}\nGET / lists available endpoints.";
             }
             return cachedDocs;
+        }
+
+        internal static void TryRespondBytes(HttpListenerContext ctx, int status, string contentType, byte[] bytes)
+        {
+            try
+            {
+                ctx.Response.StatusCode = status;
+                ctx.Response.ContentType = contentType;
+                ctx.Response.ContentLength64 = bytes.Length;
+                ctx.Response.OutputStream.Write(bytes, 0, bytes.Length);
+                ctx.Response.OutputStream.Close();
+            }
+            catch
+            {
+                // client disconnected, nothing to do
+            }
         }
 
         internal static void TryRespondRaw(HttpListenerContext ctx, int status, string contentType, string body)

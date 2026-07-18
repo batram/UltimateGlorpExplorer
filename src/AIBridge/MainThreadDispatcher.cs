@@ -1,4 +1,5 @@
 #if MONO
+using System.Collections;
 using System.Threading;
 
 namespace UnityExplorer.AIBridge
@@ -31,6 +32,40 @@ namespace UnityExplorer.AIBridge
                 throw new TargetInvocationException(item.Error);
 
             return item.Result;
+        }
+
+        // Like Run, but func executes after rendering (WaitForEndOfFrame), which
+        // screen capture requires. Called from the HTTP thread.
+        public static object RunAtEndOfFrame(Func<object> func, int timeoutMs)
+        {
+            WorkItem item = new() { Func = func };
+            Run(() =>
+            {
+                RuntimeHelper.StartCoroutine(EndOfFrameCoroutine(item));
+                return null;
+            }, timeoutMs);
+
+            if (!item.Done.WaitOne(timeoutMs, false))
+                throw new TimeoutException($"End-of-frame work did not complete within {timeoutMs}ms.");
+
+            if (item.Error != null)
+                throw new TargetInvocationException(item.Error);
+
+            return item.Result;
+        }
+
+        static IEnumerator EndOfFrameCoroutine(WorkItem item)
+        {
+            yield return new WaitForEndOfFrame();
+            try
+            {
+                item.Result = item.Func();
+            }
+            catch (Exception ex)
+            {
+                item.Error = ex;
+            }
+            item.Done.Set();
         }
 
         // Called from the Unity main thread once per frame.
