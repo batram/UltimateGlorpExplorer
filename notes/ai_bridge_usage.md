@@ -139,3 +139,17 @@ Register clients against **7312** instead of 7311:
 
 - Claude Code: `claude mcp add --transport http uch-game http://127.0.0.1:7312/mcp`
 - Codex: `url = "http://127.0.0.1:7312/mcp"`
+
+### Multi-instance (networked mods)
+
+Game instances auto-bind ports 7311, 7313, 7314... (up to 16 slots, 7312 = proxy).
+The proxy (v2) scans the range and adds:
+
+- `list_instances` — running instances with identity (port, pid, steamName, utc clock)
+- `_port` argument injected into every game tool — target a specific instance
+- `launch_game(count)` / `kill_game(pid?)` — full lifecycle control from the agent
+  (game exe path via `UCH_DIR` env var, default `S:\SteamLibrary\...\Ultimate Chicken Horse`)
+- `postmortem(lines)` — disk log tails (UnityExplorer / BepInEx / Unity player),
+  readable even when the game crashed or hung
+
+Logs and observer events carry wall-clock `utc` fields for cross-instance correlation.

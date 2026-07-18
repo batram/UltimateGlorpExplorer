@@ -19,31 +19,46 @@ namespace UnityExplorer.AIBridge
         internal const int DISPATCH_TIMEOUT_MS = 15000;
         const int MAX_VALUE_STRING_LENGTH = 500;
 
+        const int PORT_SCAN_RANGE = 16; // supports many concurrent game instances (networked testing)
+
         static HttpListener listener;
+        internal static int Port { get; private set; }
 
         public static void Init()
         {
-            int port = ConfigManager.AI_Bridge_Port.Value;
-            if (port <= 0)
+            int basePort = ConfigManager.AI_Bridge_Port.Value;
+            if (basePort <= 0)
                 return;
 
-            try
+            // Multiple game instances: take the first free port in [base, base+16).
+            for (int port = basePort; port < basePort + PORT_SCAN_RANGE; port++)
             {
-                listener = new HttpListener();
-                listener.Prefixes.Add($"http://127.0.0.1:{port}/");
-                listener.Start();
+                try
+                {
+                    listener = new HttpListener();
+                    listener.Prefixes.Add($"http://127.0.0.1:{port}/");
+                    listener.Start();
+                    Port = port;
+                    break;
+                }
+                catch
+                {
+                    listener = null;
+                }
             }
-            catch (Exception ex)
+
+            if (listener == null)
             {
-                ExplorerCore.LogWarning($"AI Bridge failed to start on port {port}: {ex}");
-                listener = null;
+                ExplorerCore.LogWarning($"AI Bridge failed to start: no free port in [{basePort}, {basePort + PORT_SCAN_RANGE}).");
                 return;
             }
+
+            CacheInstanceIdentity();
 
             Thread thread = new(ListenLoop) { IsBackground = true, Name = "UE-AIBridge" };
             thread.Start();
 
-            ExplorerCore.Log($"AI Bridge listening on http://127.0.0.1:{port}/");
+            ExplorerCore.Log($"AI Bridge listening on http://127.0.0.1:{Port}/");
         }
 
         static void ListenLoop()
@@ -82,6 +97,7 @@ namespace UnityExplorer.AIBridge
                     {
                         { "ok", true },
                         { "name", $"{ExplorerCore.NAME} AI Bridge" },
+                        { "instance", GetInstanceIdentity() },
                         { "endpoints", new List<object>
                             {
                                 "GET /docs - full API documentation (markdown)",
@@ -679,6 +695,7 @@ namespace UnityExplorer.AIBridge
                     { "index", i },
                     { "type", log.type.ToString() },
                     { "message", log.message },
+                    { "utc", log.utc.ToString("o") },
                 });
             }
             return new Dictionary<string, object>
@@ -741,6 +758,39 @@ namespace UnityExplorer.AIBridge
 
 
         #region Helpers
+
+        static string cachedProductName;
+        static string cachedSteamName;
+
+        // Main thread only; called once from Init.
+        static void CacheInstanceIdentity()
+        {
+            try { cachedProductName = Application.productName; } catch { }
+
+            // Steam persona name, if Steamworks is available (helps label host vs client).
+            try
+            {
+                Type steamFriends = ReflectionUtility.GetTypeByName("Steamworks.SteamFriends");
+                MethodInfo getName = steamFriends?.GetMethod("GetPersonaName", BindingFlags.Static | BindingFlags.Public);
+                if (getName != null)
+                    cachedSteamName = getName.Invoke(null, null)?.ToString();
+            }
+            catch { }
+        }
+
+        // Identifies this game instance so agents can tell multiple running copies apart.
+        // Thread-safe (uses cached values).
+        internal static Dictionary<string, object> GetInstanceIdentity()
+        {
+            return new Dictionary<string, object>
+            {
+                { "port", Port },
+                { "pid", System.Diagnostics.Process.GetCurrentProcess().Id },
+                { "product", cachedProductName },
+                { "steamName", cachedSteamName },
+                { "utc", DateTime.UtcNow.ToString("o") },
+            };
+        }
 
         static Dictionary<string, object> Error(string message)
             => new() { { "ok", false }, { "error", message } };

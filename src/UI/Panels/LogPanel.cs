@@ -12,8 +12,9 @@ namespace UnityExplorer.UI.Panels
         {
             public string message;
             public LogType type;
+            public DateTime utc;
 
-            public LogInfo(string message, LogType type) { this.message = message; this.type = type; }
+            public LogInfo(string message, LogType type) { this.message = message; this.type = type; this.utc = DateTime.UtcNow; }
         }
 
         private static readonly List<LogInfo> Logs = new();

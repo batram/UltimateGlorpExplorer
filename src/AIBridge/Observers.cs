@@ -148,6 +148,7 @@ namespace UnityExplorer.AIBridge
                 { "previous", previous },
                 { "time", Time.time },
                 { "frame", Time.frameCount },
+                { "utc", DateTime.UtcNow.ToString("o") },
             });
 
             while (events.Count > MAX_EVENTS)

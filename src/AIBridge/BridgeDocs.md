@@ -167,6 +167,25 @@ Poll by passing the previous `total` as `since` (cursor). Unity `Debug.Log`
 messages only appear if the "Log Unity Debug" config option is enabled.
 `Debug.Log` from your own `/execute` payloads is a good feedback channel.
 
+## Multiple instances (networked-mod testing)
+
+Each game instance binds the first free port in `[7311, 7327)` (the proxy's 7312 is
+skipped automatically), so you can run many instances — host + up to 7 clients tested.
+`GET /` includes an `instance` identity: port, pid, steamName, and a wall-clock `utc`.
+Log entries and observer events also carry `utc` timestamps so you can correlate
+"host sent X" / "client received X" across instances.
+
+Via the proxy (port 7312), use `list_instances` to enumerate running instances and
+pass `_port` on any game tool to target a specific one. `launch_game(count)`,
+`kill_game` and `postmortem` (disk log tails, works when the game is dead) are
+served by the proxy itself. Kill all instances before redeploying the mod DLL —
+the file is locked while any instance runs.
+
+**Restart resilience:** hooks and observers are in-memory and lost on restart.
+To persist setup across restarts, write it as C# to
+`<game>\BepInEx\plugins\sinai-dev-UnityExplorer\Scripts\startup.cs` — UnityExplorer
+executes it on every boot.
+
 ## Typical debugging loop
 
 1. `GET /` — confirm the game is up.
