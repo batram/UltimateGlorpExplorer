@@ -399,12 +399,12 @@ string SanityCheckModSetup(out string warning)
     string pluginsDir = Path.Combine(gameDir, @"BepInEx\plugins");
     if (!Directory.Exists(pluginsDir))
         return $"BepInEx plugins directory not found: {pluginsDir}";
-    string deployedDll = Directory.GetFiles(pluginsDir, "UnityExplorer*.dll", SearchOption.AllDirectories)
+    string deployedDll = Directory.GetFiles(pluginsDir, "UltimateGlorpExplorer*.dll", SearchOption.AllDirectories)
         .OrderByDescending(File.GetLastWriteTimeUtc)
         .FirstOrDefault();
     if (deployedDll == null)
-        return $"No UnityExplorer*.dll found under {pluginsDir} — deploy the mod DLL first " +
-            @"(build_uch.ps1, then copy Release\UnityExplorer.BepInEx5.Mono\UnityExplorer.BIE5.Mono.dll there).";
+        return $"No UltimateGlorpExplorer*.dll found under {pluginsDir} — deploy the mod DLL first " +
+            @"(build_uch.ps1, then copy Release\UnityExplorer.BepInEx5.Mono\UltimateGlorpExplorer.BIE5.Mono.dll there).";
 
     // 3. AI bridge not disabled in the UnityExplorer config (missing cfg = defaults = enabled).
     string cfg = Path.Combine(gameDir, @"BepInEx\config\com.sinai.unityexplorer.cfg");
@@ -440,7 +440,7 @@ static string FindRepoBuildDll()
         DirectoryInfo dir = new(AppContext.BaseDirectory);
         for (int i = 0; i < 6 && dir != null; i++, dir = dir.Parent)
         {
-            string candidate = Path.Combine(dir.FullName, @"Release\UnityExplorer.BepInEx5.Mono\UnityExplorer.BIE5.Mono.dll");
+            string candidate = Path.Combine(dir.FullName, @"Release\UnityExplorer.BepInEx5.Mono\UltimateGlorpExplorer.BIE5.Mono.dll");
             if (File.Exists(candidate))
                 return candidate;
         }

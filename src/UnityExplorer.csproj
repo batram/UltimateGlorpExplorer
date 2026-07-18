@@ -61,7 +61,7 @@
         <TargetFramework>net35</TargetFramework>
         <OutputPath>..\Release\UnityExplorer.BepInEx5.Mono\</OutputPath>
         <DefineConstants>MONO,BIE,BIE5</DefineConstants>
-        <AssemblyName>UnityExplorer.BIE5.Mono</AssemblyName>
+        <AssemblyName>UltimateGlorpExplorer.BIE5.Mono</AssemblyName>
     </PropertyGroup>
     <!-- STANDALONE Mono -->
     <PropertyGroup Condition="'$(Configuration)'=='STANDALONE_Mono'">

@@ -10,7 +10,7 @@ using BepInEx.IL2CPP;
 
 namespace UnityExplorer
 {
-    [BepInPlugin(ExplorerCore.GUID, "UnityExplorer", ExplorerCore.VERSION)]
+    [BepInPlugin(ExplorerCore.GUID, ExplorerCore.NAME, ExplorerCore.VERSION)]
 
     public class ExplorerBepInPlugin :
 #if MONO

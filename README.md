@@ -29,7 +29,7 @@ Claude Code, Codex & friends can use the running game as a tool server:
   adds lifecycle tools — `launch_game`, `kill_game`, `list_instances`, crash `postmortem`.
 - **Multi-instance support** for networked-mod testing: run host + many clients, target each
   via `_port`, correlate across instances with wall-clock timestamps.
-- **Single-DLL build**: [`build_uch.ps1`](build_uch.ps1) → one merged `UnityExplorer.BIE5.Mono.dll`.
+- **Single-DLL build**: [`build_uch.ps1`](build_uch.ps1) → one merged `UltimateGlorpExplorer.BIE5.Mono.dll`.
 
 ```
 claude mcp add --transport http uch-game http://127.0.0.1:7310/mcp

@@ -12,7 +12,7 @@ architecture, and worked examples.
 
 ```powershell
 .\build_uch.ps1        # builds BIE5_Mono and ILRepack-merges everything into ONE dll
-# copy Release\UnityExplorer.BepInEx5.Mono\UnityExplorer.BIE5.Mono.dll to <game>\BepInEx\plugins\
+# copy Release\UnityExplorer.BepInEx5.Mono\UltimateGlorpExplorer.BIE5.Mono.dll to <game>\BepInEx\plugins\
 
 dotnet run --project mcp-proxy -c Release    # keep the always-on proxy running (port 7310)
 ```
