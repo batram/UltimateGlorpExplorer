@@ -1,4 +1,71 @@
 <p align="center">
+  <img align="center" src="https://cdn.discordapp.com/emojis/1488767197277847583.webp" width="128" alt="glorb">
+</p>
+
+<h1 align="center">UltimateGlorpExplorer</h1>
+
+<p align="center">
+  🔍 UnityExplorer, but it talks to your AI. 🐔
+</p>
+<p align="center">
+  A fork of <a href="https://github.com/sinai-dev/UnityExplorer">sinai-dev/UnityExplorer</a> specialized for modding
+  <b>Ultimate Chicken Horse</b> (BepInEx 5, Mono), with an embedded bridge that lets AI agents
+  inspect and script the running game.
+</p>
+
+## What's different in this fork
+
+- **AI bridge** — a localhost HTTP JSON API embedded in the game (`http://127.0.0.1:7311`, port configurable):
+  - `GET /scene` — live scene hierarchy
+  - `GET /inspect?path=...` / `?type=...` — GameObject state and type signatures
+  - `POST /execute` — run C# in the game via the REPL console
+  - `GET /logs` — log tail with cursor polling
+  - `GET /docs` — the bridge serves its own API documentation
+- **MCP (Modded Chicken Protocol)** server at `POST /mcp` — coincidentally wire-compatible with Anthropic's
+  [Model Context Protocol](https://modelcontextprotocol.io) (Streamable HTTP, stateless), so Claude Code,
+  Codex, Cursor & friends can use the game as a tool server directly:
+  ```
+  claude mcp add --transport http uch-game http://127.0.0.1:7312/mcp
+  ```
+- **Downtime-hiding proxy** ([`mcp-proxy/`](mcp-proxy/)) — tiny always-on .NET app on port `7312` that forwards
+  to the game and keeps MCP clients happy while the game is closed or restarting (cached tool list, clean
+  "game is not running" tool errors). Register clients against `7312`; use `7311` only if the game is always up.
+- **Single-DLL build** — [`build_uch.ps1`](build_uch.ps1) produces one ILRepack-merged
+  `UnityExplorer.BIE5.Mono.dll` (UniverseLib, mcs, Tomlet, Newtonsoft.Json included).
+
+## Quickstart
+
+```powershell
+# build the single DLL
+.\build_uch.ps1
+
+# deploy (adjust path): copy Release\UnityExplorer.BepInEx5.Mono\UnityExplorer.BIE5.Mono.dll
+#   into <game>\BepInEx\plugins\
+
+# keep the proxy running
+dotnet run --project mcp-proxy -c Release
+```
+
+Launch the game, then poke it:
+
+```bash
+curl http://127.0.0.1:7311/docs                      # full API docs, served by the game
+curl "http://127.0.0.1:7311/scene?depth=1"
+curl -X POST --data 'UnityEngine.Time.timeScale = 0.5f;' http://127.0.0.1:7311/execute
+```
+
+See [notes/ai_bridge_usage.md](notes/ai_bridge_usage.md) for the full agent-facing guide.
+
+Only the **BepInEx 5 Mono** target is maintained in this fork; everything below is inherited from upstream.
+All credit for UnityExplorer itself goes to [sinai-dev](https://github.com/sinai-dev) — powered by
+[UniverseLib](https://github.com/sinai-dev/UniverseLib).
+
+
+---
+
+# Original UnityExplorer README
+
+<p align="center">
   <img align="center" src="img/icon.png">
 </p>
 
