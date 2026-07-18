@@ -1,4 +1,5 @@
 #if MONO
+using Newtonsoft.Json;
 using System.Net;
 using System.Text;
 using System.Threading;
@@ -14,7 +15,7 @@ namespace UnityExplorer.AIBridge
     // Endpoints: GET /scene, GET /inspect, POST /execute, GET /logs
     public static class AIBridgeServer
     {
-        const int DISPATCH_TIMEOUT_MS = 15000;
+        internal const int DISPATCH_TIMEOUT_MS = 15000;
         const int MAX_VALUE_STRING_LENGTH = 500;
 
         static HttpListener listener;
@@ -83,6 +84,7 @@ namespace UnityExplorer.AIBridge
                         { "endpoints", new List<object>
                             {
                                 "GET /docs - full API documentation (markdown)",
+                                "POST /mcp - MCP server (JSON-RPC 2.0, Streamable HTTP transport)",
                                 "GET /scene?depth=N&max=N - scene hierarchy",
                                 "GET /inspect?path=<GameObject/path> - component fields/properties of a GameObject",
                                 "GET /inspect?type=<TypeName> - member signatures of a type",
@@ -137,16 +139,7 @@ namespace UnityExplorer.AIBridge
                             TryRespond(ctx, 400, Error("Empty request body."));
                             return;
                         }
-                        object result = MainThreadDispatcher.Run(() =>
-                        {
-                            ConsoleController.EvalResult eval = ConsoleController.EvaluateCapture(code);
-                            return new Dictionary<string, object>
-                            {
-                                { "ok", eval.Ok },
-                                { "result", eval.Result },
-                                { "error", eval.Error },
-                            };
-                        }, DISPATCH_TIMEOUT_MS);
+                        object result = MainThreadDispatcher.Run(() => ExecuteCode(code), DISPATCH_TIMEOUT_MS);
                         TryRespond(ctx, 200, result);
                         return;
                     }
@@ -154,30 +147,14 @@ namespace UnityExplorer.AIBridge
                 case "/logs":
                     {
                         int since = ParseIntParam(ctx, "since", 0);
-                        object result = MainThreadDispatcher.Run(() =>
-                        {
-                            List<object> entries = new();
-                            int total = LogPanel.LogCount;
-                            for (int i = Math.Max(0, since); i < total; i++)
-                            {
-                                LogPanel.LogInfo log = LogPanel.GetLog(i);
-                                entries.Add(new Dictionary<string, object>
-                                {
-                                    { "index", i },
-                                    { "type", log.type.ToString() },
-                                    { "message", log.message },
-                                });
-                            }
-                            return new Dictionary<string, object>
-                            {
-                                { "ok", true },
-                                { "total", total },
-                                { "entries", entries },
-                            };
-                        }, DISPATCH_TIMEOUT_MS);
+                        object result = MainThreadDispatcher.Run(() => GetLogs(since), DISPATCH_TIMEOUT_MS);
                         TryRespond(ctx, 200, result);
                         return;
                     }
+
+                case "/mcp":
+                    McpEndpoint.Handle(ctx);
+                    return;
 
                 default:
                     TryRespond(ctx, 404, Error($"Unknown endpoint '{path}'. GET / lists available endpoints."));
@@ -188,7 +165,7 @@ namespace UnityExplorer.AIBridge
 
         #region Scene hierarchy
 
-        static object BuildSceneTree(int maxDepth, int maxNodes)
+        internal static object BuildSceneTree(int maxDepth, int maxNodes)
         {
             List<object> scenes = new();
             int nodeCount = 0;
@@ -277,7 +254,7 @@ namespace UnityExplorer.AIBridge
 
         #region Inspect
 
-        static object InspectGameObject(string path)
+        internal static object InspectGameObject(string path)
         {
             GameObject go = ResolveGameObject(path);
             if (go == null)
@@ -345,7 +322,7 @@ namespace UnityExplorer.AIBridge
             };
         }
 
-        static object InspectType(string typeName)
+        internal static object InspectType(string typeName)
         {
             Type type = ReflectionUtility.GetTypeByName(typeName);
             if (type == null)
@@ -431,6 +408,44 @@ namespace UnityExplorer.AIBridge
         #endregion
 
 
+        #region Shared endpoint handlers (REST + MCP)
+
+        internal static object ExecuteCode(string code)
+        {
+            ConsoleController.EvalResult eval = ConsoleController.EvaluateCapture(code);
+            return new Dictionary<string, object>
+            {
+                { "ok", eval.Ok },
+                { "result", eval.Result },
+                { "error", eval.Error },
+            };
+        }
+
+        internal static object GetLogs(int since)
+        {
+            List<object> entries = new();
+            int total = LogPanel.LogCount;
+            for (int i = Math.Max(0, since); i < total; i++)
+            {
+                LogPanel.LogInfo log = LogPanel.GetLog(i);
+                entries.Add(new Dictionary<string, object>
+                {
+                    { "index", i },
+                    { "type", log.type.ToString() },
+                    { "message", log.message },
+                });
+            }
+            return new Dictionary<string, object>
+            {
+                { "ok", true },
+                { "total", total },
+                { "entries", entries },
+            };
+        }
+
+        #endregion
+
+
         #region Helpers
 
         static Dictionary<string, object> Error(string message)
@@ -464,7 +479,7 @@ namespace UnityExplorer.AIBridge
             return cachedDocs;
         }
 
-        static void TryRespondRaw(HttpListenerContext ctx, int status, string contentType, string body)
+        internal static void TryRespondRaw(HttpListenerContext ctx, int status, string contentType, string body)
         {
             try
             {
@@ -486,7 +501,7 @@ namespace UnityExplorer.AIBridge
         {
             try
             {
-                byte[] bytes = Encoding.UTF8.GetBytes(Json.Serialize(payload));
+                byte[] bytes = Encoding.UTF8.GetBytes(JsonConvert.SerializeObject(payload));
                 ctx.Response.StatusCode = status;
                 ctx.Response.ContentType = "application/json";
                 ctx.Response.ContentEncoding = Encoding.UTF8;

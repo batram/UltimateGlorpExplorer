@@ -107,3 +107,17 @@ messages only appear if the "Log Unity Debug" config option is enabled.
   `S:\SteamLibrary\steamapps\common\Ultimate Chicken Horse\BepInEx\plugins\`
 - Launch the game; bridge logs `AI Bridge listening on http://127.0.0.1:7311/`.
 - API docs for the deployed version: `curl http://127.0.0.1:7311/docs`
+
+## MCP mode
+
+The same five tools are exposed as an MCP server (Streamable HTTP, stateless) at
+`POST /mcp` — usable directly by Claude Code, Codex, Cursor, etc., no bridge process:
+
+- Claude Code: `claude mcp add --transport http uch-game http://127.0.0.1:7311/mcp`
+- Codex (`~/.codex/config.toml` or project `.codex/config.toml`):
+  ```toml
+  [mcp_servers.uch-game]
+  url = "http://127.0.0.1:7311/mcp"
+  ```
+
+REST endpoints remain available alongside; both call the same handlers.

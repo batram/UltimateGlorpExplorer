@@ -7,6 +7,13 @@ game state and execute C# inside the running game.
 - Requests execute on the Unity main thread (max ~1 per frame). Timeout after 15s
   (e.g. game paused/frozen) returns HTTP 500.
 - `GET /` — machine-readable endpoint index (liveness check). `GET /docs` — this document.
+- Two access modes, same underlying tools: plain REST endpoints (below, curl-friendly)
+  and an MCP server at `POST /mcp` (JSON-RPC 2.0, Streamable HTTP transport, stateless).
+  MCP registration:
+  - Claude Code: `claude mcp add --transport http uch-game http://127.0.0.1:7311/mcp`
+  - Codex (`~/.codex/config.toml`): `[mcp_servers.uch-game]` / `url = "http://127.0.0.1:7311/mcp"`
+  - MCP tools: `get_scene`, `inspect_gameobject`, `inspect_type`, `execute_csharp`, `get_logs`
+    (parameters mirror the REST endpoints below).
 
 ## Endpoints
 
