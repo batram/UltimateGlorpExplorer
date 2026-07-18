@@ -93,6 +93,9 @@ namespace UnityExplorer.AIBridge
                                 "GET /search?mode=object|singleton|class&name=&type=&limit=N - find objects, singletons or classes",
                                 "GET /hooks | POST /hooks/create | GET /hooks/toggle?sig= | GET /hooks/delete?sig= - Harmony method hooks",
                                 "POST /watch?frames=N - body is a C# expression, sampled once per frame",
+                                "GET /observers | POST /observers/create?mode= | GET /observers/delete?id= - per-frame observers recording into the event buffer",
+                                "GET /events?since=N - drain observer events (cursor)",
+                                "POST /wait_for?mode=&timeout=ms - block until an expression becomes true / changes",
                                 "GET /inspect_at?x=&y= - world raycast at normalized screen coords (top-left origin)",
                                 "GET /freecam?enabled=&x=&y=&z= - toggle/position the free camera",
                                 "POST /execute - body is raw C#, evaluated in the REPL",
@@ -213,6 +216,64 @@ namespace UnityExplorer.AIBridge
                         int frames = ParseIntParam(ctx, "frames", 60);
                         int watchTimeout = Math.Max(DISPATCH_TIMEOUT_MS, frames * 100 + 5000);
                         object result = BridgeTools.Watch(expression, frames, watchTimeout);
+                        TryRespond(ctx, 200, result);
+                        return;
+                    }
+
+                case "/observers":
+                    {
+                        object result = MainThreadDispatcher.Run(Observers.List, DISPATCH_TIMEOUT_MS);
+                        TryRespond(ctx, 200, result);
+                        return;
+                    }
+
+                case "/observers/create":
+                    {
+                        // POST body = C# expression; ?mode=change|true (default change)
+                        if (ctx.Request.HttpMethod != "POST")
+                        {
+                            TryRespond(ctx, 405, Error("Use POST with the C# expression as the request body. Optional ?mode=change|true"));
+                            return;
+                        }
+                        string expression;
+                        using (StreamReader reader = new(ctx.Request.InputStream, ctx.Request.ContentEncoding ?? Encoding.UTF8))
+                            expression = reader.ReadToEnd();
+                        string mode = ctx.Request.QueryString["mode"];
+                        object result = MainThreadDispatcher.Run(() => Observers.Create(expression, mode), DISPATCH_TIMEOUT_MS);
+                        TryRespond(ctx, 200, result);
+                        return;
+                    }
+
+                case "/observers/delete":
+                    {
+                        int obsId = ParseIntParam(ctx, "id", -1);
+                        object result = MainThreadDispatcher.Run(() => Observers.Delete(obsId), DISPATCH_TIMEOUT_MS);
+                        TryRespond(ctx, 200, result);
+                        return;
+                    }
+
+                case "/events":
+                    {
+                        long since = long.TryParse(ctx.Request.QueryString["since"], out long s) ? s : 0;
+                        object result = MainThreadDispatcher.Run(() => Observers.GetEvents(since), DISPATCH_TIMEOUT_MS);
+                        TryRespond(ctx, 200, result);
+                        return;
+                    }
+
+                case "/wait_for":
+                    {
+                        // POST body = C# expression; ?mode=true|change (default true), ?timeout=ms (default 30000)
+                        if (ctx.Request.HttpMethod != "POST")
+                        {
+                            TryRespond(ctx, 405, Error("Use POST with the C# expression as the request body. Optional ?mode=true|change&timeout=ms"));
+                            return;
+                        }
+                        string expression;
+                        using (StreamReader reader = new(ctx.Request.InputStream, ctx.Request.ContentEncoding ?? Encoding.UTF8))
+                            expression = reader.ReadToEnd();
+                        string mode = ctx.Request.QueryString["mode"];
+                        int timeout = ParseIntParam(ctx, "timeout", 30000);
+                        object result = Observers.WaitFor(expression, mode, timeout);
                         TryRespond(ctx, 200, result);
                         return;
                     }

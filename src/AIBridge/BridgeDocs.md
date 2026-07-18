@@ -14,6 +14,7 @@ game state and execute C# inside the running game.
   - Codex (`~/.codex/config.toml`): `[mcp_servers.uch-game]` / `url = "http://127.0.0.1:7311/mcp"`
   - MCP tools: `get_scene`, `inspect_gameobject`, `inspect_type`, `inspect_id`, `find_objects`,
     `execute_csharp`, `create_hook`, `list_hooks`, `toggle_hook`, `delete_hook`, `watch`,
+    `create_observer`, `list_observers`, `delete_observer`, `get_events`, `wait_for`,
     `inspect_at`, `freecam`, `screenshot`, `get_logs` (parameters mirror the REST endpoints below).
 
 ## Endpoints
@@ -113,6 +114,29 @@ UnityExplorer's Hooks panel.
 
 Body = single C# expression (no trailing `;`). Compiled once, evaluated every frame
 for N frames (default 60, max 600); returns `{frame, time, value}` samples.
+
+### Observers — "notify me when this changes"
+```
+curl -X POST --data 'PlayerManager.Instance.playerCount' "http://127.0.0.1:7311/observers/create?mode=change"
+curl "http://127.0.0.1:7311/events?since=0"      # drain recorded events (cursor = previous 'total')
+curl "http://127.0.0.1:7311/observers"           # list active observers
+curl "http://127.0.0.1:7311/observers/delete?id=1"
+```
+Observers sample the expression **every frame** and record changes (`mode=change`)
+or false→true edges (`mode=true`) into an event buffer — nothing is missed while
+you work on other things; drain with `/events` when convenient. Events carry
+observerId, kind (change/condition/error), value, previous, time, frame.
+A throwing expression records one `error` event and deactivates the observer.
+Observers and events do not survive a game restart.
+
+### POST /wait_for — block until something happens
+`curl -X POST --data 'PlayerManager.Instance.playerCount > 1' "http://127.0.0.1:7311/wait_for?timeout=60000"`
+
+Blocks until the expression becomes true (`mode=true`, default) or changes
+(`mode=change`), then returns the triggering value and frames waited — the
+closest thing to a push notification in a request/response flow. Returns
+`triggered:false` on timeout (default 30s, cap 5min). Keep the timeout within
+your MCP client's tool timeout.
 
 ### GET /inspect_at — what's at this pixel?
 `curl "http://127.0.0.1:7311/inspect_at?x=0.5&y=0.5"`

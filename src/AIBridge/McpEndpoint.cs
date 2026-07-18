@@ -214,6 +214,45 @@ namespace UnityExplorer.AIBridge
                         ["frames"] = Prop("integer", "Number of frames to sample (default 60, max 600)."),
                     }, "expression"),
 
+                Tool("create_observer",
+                    "Register a C# expression to be sampled EVERY FRAME in the game; value changes (mode='change', default) " +
+                    "or false->true edges (mode='true') are recorded into an event buffer with frame/timestamps. " +
+                    "Nothing is missed while you do other work — drain events later with get_events. " +
+                    "Observers are lost on game restart.",
+                    new JObject
+                    {
+                        ["expression"] = Prop("string", "Single C# expression, no trailing ';'."),
+                        ["mode"] = Prop("string", "'change' (record every value change, default) or 'true' (record when a bool expression becomes true)."),
+                    }, "expression"),
+
+                Tool("list_observers",
+                    "List active observers with their last sampled values.",
+                    new JObject()),
+
+                Tool("delete_observer",
+                    "Remove an observer by id.",
+                    new JObject { ["id"] = Prop("integer", "Observer id from create_observer.") }, "id"),
+
+                Tool("get_events",
+                    "Drain recorded observer events. Returns { total, oldestAvailable, events }; poll incrementally by " +
+                    "passing the previous 'total' as 'since'. Each event has observerId, kind (change/condition/error), " +
+                    "value, previous, time and frame.",
+                    new JObject
+                    {
+                        ["since"] = Prop("integer", "Cursor: return events from this index (default 0)."),
+                    }),
+
+                Tool("wait_for",
+                    "BLOCK until a C# expression becomes true (mode='true', default) or changes value (mode='change'), " +
+                    "then return the triggering value — a pseudo-notification. Use for 'run X, then wait until Y happens, then...'. " +
+                    "Returns triggered=false on timeout. Keep timeouts within your client's tool timeout.",
+                    new JObject
+                    {
+                        ["expression"] = Prop("string", "Single C# expression, no trailing ';'."),
+                        ["mode"] = Prop("string", "'true' (default) or 'change'."),
+                        ["timeout_ms"] = Prop("integer", "Max wait in ms (default 30000, cap 300000)."),
+                    }, "expression"),
+
                 Tool("inspect_at",
                     "World-physics raycast at a screen position: 'what object is at this pixel?'. " +
                     "Coordinates are normalized 0..1 from the TOP-LEFT, matching screenshot orientation " +
@@ -343,6 +382,42 @@ namespace UnityExplorer.AIBridge
                             int frames = args.Value<int?>("frames") ?? 60;
                             int watchTimeout = Math.Max(AIBridgeServer.DISPATCH_TIMEOUT_MS, frames * 100 + 5000);
                             result = BridgeTools.Watch(expression, frames, watchTimeout);
+                            break;
+                        }
+                    case "create_observer":
+                        {
+                            string expression = args.Value<string>("expression");
+                            if (string.IsNullOrEmpty(expression))
+                                return RpcError(id, -32602, "Missing required argument 'expression'.");
+                            string mode = args.Value<string>("mode");
+                            result = MainThreadDispatcher.Run(() => Observers.Create(expression, mode), AIBridgeServer.DISPATCH_TIMEOUT_MS);
+                            break;
+                        }
+                    case "list_observers":
+                        result = MainThreadDispatcher.Run(Observers.List, AIBridgeServer.DISPATCH_TIMEOUT_MS);
+                        break;
+                    case "delete_observer":
+                        {
+                            int? obsId = args.Value<int?>("id");
+                            if (obsId == null)
+                                return RpcError(id, -32602, "Missing required argument 'id'.");
+                            result = MainThreadDispatcher.Run(() => Observers.Delete(obsId.Value), AIBridgeServer.DISPATCH_TIMEOUT_MS);
+                            break;
+                        }
+                    case "get_events":
+                        {
+                            long since = args.Value<long?>("since") ?? 0;
+                            result = MainThreadDispatcher.Run(() => Observers.GetEvents(since), AIBridgeServer.DISPATCH_TIMEOUT_MS);
+                            break;
+                        }
+                    case "wait_for":
+                        {
+                            string expression = args.Value<string>("expression");
+                            if (string.IsNullOrEmpty(expression))
+                                return RpcError(id, -32602, "Missing required argument 'expression'.");
+                            string mode = args.Value<string>("mode");
+                            int timeoutMs = args.Value<int?>("timeout_ms") ?? 30000;
+                            result = Observers.WaitFor(expression, mode, timeoutMs);
                             break;
                         }
                     case "inspect_at":
