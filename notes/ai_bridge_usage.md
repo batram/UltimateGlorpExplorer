@@ -121,3 +121,21 @@ The same five tools are exposed as an MCP server (Streamable HTTP, stateless) at
   ```
 
 REST endpoints remain available alongside; both call the same handlers.
+
+### Always-on proxy (recommended registration target)
+
+`mcp-proxy/` is a tiny .NET console app that hides game downtime from MCP clients
+(clients only probe MCP servers at session start, so registering the game directly
+means no tools when it isn't running yet):
+
+- Listens on `http://127.0.0.1:7312/mcp`, forwards to the game on 7311.
+- Game down: answers `initialize`/`ping` itself, serves `tools/list` from a cache
+  (`tools-cache.json`, filled whenever the game was reachable), and returns a clean
+  "game is not running, ask the user to launch UCH" tool error on `tools/call`.
+- Game restarts are invisible (everything is stateless) — calls just work again.
+
+Run it: `dotnet run --project mcp-proxy -c Release` (keep it running, e.g. autostart).
+Register clients against **7312** instead of 7311:
+
+- Claude Code: `claude mcp add --transport http uch-game http://127.0.0.1:7312/mcp`
+- Codex: `url = "http://127.0.0.1:7312/mcp"`
