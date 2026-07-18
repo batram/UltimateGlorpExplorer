@@ -79,6 +79,8 @@ launches) when the deployed DLL is older than the repo's last build, i.e. you fo
 Its optional `args` string array is passed unchanged to every launched game process; arguments
 containing spaces do not need manual quoting. For example:
 `launch_game {count: 1, args: ["-screen-width", "1280", "-screen-height", "720"]}`.
+One call can launch up to 32 instances. Their bridges use the first free ports in
+`[7311, 7343)`; use `list_instances` to discover the actual port-to-process mapping.
 
 ## Worked examples
 
@@ -165,7 +167,7 @@ Via MCP against the proxy:
 ### Restart resilience
 
 Hooks and observers are in-memory. Persist agent setup by writing C# to
-`<game>\BepInEx\plugins\sinai-dev-UnityExplorer\Scripts\startup.cs` — it runs on every boot.
+`<game>\BepInEx\plugins\zmarn-dev-UnityExplorer\Scripts\startup.cs` — it runs on every boot.
 
 ## Repo layout
 

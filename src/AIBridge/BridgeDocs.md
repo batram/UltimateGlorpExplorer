@@ -198,9 +198,9 @@ messages only appear if the "Log Unity Debug" config option is enabled.
 
 ## Multiple instances (networked-mod testing)
 
-Each game instance binds the first free port in `[7311, 7327)` — host on 7311,
-clients on 7312, 7313, ... — so you can run many instances (host + up to 7 clients
-tested). The proxy sits just below the range on 7310.
+Each game instance binds the first free port in `[7311, 7343)` — host on 7311,
+clients on 7312, 7313, ... — supporting up to 32 concurrent instances. The proxy
+sits just below the range on 7310.
 `GET /` includes an `instance` identity: port, pid, steamName, and a wall-clock `utc`.
 Log entries and observer events also carry `utc` timestamps so you can correlate
 "host sent X" / "client received X" across instances.
@@ -219,7 +219,7 @@ the file is locked while any instance runs.
 
 **Restart resilience:** hooks and observers are in-memory and lost on restart.
 To persist setup across restarts, write it as C# to
-`<game>\BepInEx\plugins\sinai-dev-UnityExplorer\Scripts\startup.cs` — UnityExplorer
+`<game>\BepInEx\plugins\zmarn-dev-UnityExplorer\Scripts\startup.cs` — UltimateGlorpExplorer
 executes it on every boot.
 
 ## Typical debugging loop

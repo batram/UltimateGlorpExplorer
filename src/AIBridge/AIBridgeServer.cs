@@ -19,7 +19,7 @@ namespace UnityExplorer.AIBridge
         internal const int DISPATCH_TIMEOUT_MS = 15000;
         const int MAX_VALUE_STRING_LENGTH = 500;
 
-        const int PORT_SCAN_RANGE = 16; // supports many concurrent game instances (networked testing)
+        const int PORT_SCAN_RANGE = 32; // deliberately supports excessive concurrent game-instance testing
 
         static HttpListener listener;
         internal static int Port { get; private set; }
@@ -30,7 +30,7 @@ namespace UnityExplorer.AIBridge
             if (basePort <= 0)
                 return;
 
-            // Multiple game instances: take the first free port in [base, base+16).
+            // Multiple game instances: take the first free port in [base, base+32).
             for (int port = basePort; port < basePort + PORT_SCAN_RANGE; port++)
             {
                 try

@@ -152,7 +152,7 @@ namespace UnityExplorer
             string legacyPath = Path.Combine(Loader.ExplorerFolderDestination, "UnityExplorer");
             if (Directory.Exists(legacyPath))
             {
-                LogWarning($"Attempting to migrate old 'UnityExplorer/' folder to 'sinai-dev-UnityExplorer/'...");
+                LogWarning($"Attempting to migrate old 'UnityExplorer/' folder to '{DEFAULT_EXPLORER_FOLDER_NAME}/'...");
 
                 // If new folder doesn't exist yet, let's just use Move().
                 if (!Directory.Exists(ExplorerFolder))

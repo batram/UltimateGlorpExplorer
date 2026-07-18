@@ -46,14 +46,14 @@ namespace UnityExplorer
 
         /// <summary>
         /// Call this to initialize UnityExplorer without adding a log listener or Unhollowed modules path.
-        /// The default Unhollowed path "sinai-dev-UnityExplorer\Modules\" will be used.
+        /// The default Unhollowed path "zmarn-dev-UnityExplorer\Modules\" will be used.
         /// </summary>
         /// <returns>The new (or active, if one exists) instance of ExplorerStandalone.</returns>
         public static ExplorerStandalone CreateInstance() => CreateInstance(null, null);
 
         /// <summary>
         /// Call this to initialize UnityExplorer and add a listener for UnityExplorer's log messages, without specifying an Unhollowed modules path.
-        /// The default Unhollowed path "sinai-dev-UnityExplorer\Modules\" will be used.
+        /// The default Unhollowed path "zmarn-dev-UnityExplorer\Modules\" will be used.
         /// </summary>
         /// <param name="logListener">Your log listener to handle UnityExplorer logs.</param>
         /// <returns>The new (or active, if one exists) instance of ExplorerStandalone.</returns>

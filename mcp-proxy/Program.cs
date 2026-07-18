@@ -13,14 +13,14 @@ using System.Threading.Tasks;
 //
 // Clients register http://127.0.0.1:7310/mcp (just below the game port range, so
 // instances number contiguously from 7311). Game instances bind the first free
-// port in [7311+? no: BASE_UPSTREAM..+16); the proxy scans that range and routes
+// port in [BASE_UPSTREAM, BASE_UPSTREAM+32); the proxy scans that range and routes
 // each tools/call to a specific instance via an injected optional "_port" argument.
 // The proxy also answers four tools itself (they work with zero instances running):
 //   list_instances, launch_game, kill_game, postmortem
 
 const int ListenPort = 7310;
 const int UpstreamBasePort = 7311;
-const int UpstreamPortRange = 16;
+const int UpstreamPortRange = 32;
 
 string gameDir = Environment.GetEnvironmentVariable("UCH_DIR")
     ?? @"S:\SteamLibrary\steamapps\common\Ultimate Chicken Horse";
@@ -153,7 +153,7 @@ async Task HandleToolCallAsync(HttpListenerContext ctx, JsonNode req, JsonNode i
         case "launch_game":
             {
                 int count = (int?)args["count"]?.GetValue<double>() ?? 1;
-                count = Math.Clamp(count, 1, 8);
+                count = Math.Clamp(count, 1, 32);
                 JsonArray commandLineArgs = args["args"] as JsonArray ?? new JsonArray();
                 if (!File.Exists(gameExe))
                 {
@@ -215,7 +215,7 @@ async Task HandleToolCallAsync(HttpListenerContext ctx, JsonNode req, JsonNode i
                 lines = Math.Clamp(lines, 10, 1000);
                 JsonObject result = new();
                 result["note"] = "Log tails from disk; readable even when the game is down or crashed.";
-                AddLogTail(result, "unityexplorer", NewestFile(Path.Combine(gameDir, @"BepInEx\plugins\sinai-dev-UnityExplorer\Logs")), lines);
+                AddLogTail(result, "unityexplorer", NewestFile(Path.Combine(gameDir, @"BepInEx\plugins\zmarn-dev-UnityExplorer\Logs")), lines);
                 AddLogTail(result, "bepinex", Path.Combine(gameDir, @"BepInEx\LogOutput.log"), lines);
                 AddLogTail(result, "unity_player", Path.Combine(gameDir, "output_log.txt"), lines);
                 await RespondAsync(ctx, 200, RpcResult(id, ToolResult(result.ToJsonString(), false)).ToJsonString());
@@ -304,11 +304,11 @@ async Task HandleToolsListAsync(HttpListenerContext ctx, JsonNode id, string bod
         "List running game instances (port, pid, steam name, utc clock). Use the port as _port on any game tool to target that instance.",
         new JsonObject()));
     tools.Add(ProxyTool("launch_game",
-        "Launch 1-8 Ultimate Chicken Horse instances (for networked testing launch several; each gets its own bridge port). " +
+        "Launch 1-32 Ultimate Chicken Horse instances (for networked testing launch several; each gets its own bridge port). " +
         "Bridges come up ~5-15s later; poll list_instances.",
         new JsonObject
         {
-            ["count"] = new JsonObject { ["type"] = "integer", ["description"] = "Instances to launch (default 1, max 8)." },
+            ["count"] = new JsonObject { ["type"] = "integer", ["description"] = "Instances to launch (default 1, max 32)." },
             ["args"] = new JsonObject
             {
                 ["type"] = "array",
