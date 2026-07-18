@@ -74,30 +74,30 @@ namespace UnityExplorer.Config
 
         private static void CreateConfigElements()
         {
-            Master_Toggle = new("UnityExplorer Toggle",
-                "The key to enable or disable UnityExplorer's menu and features.",
+            Master_Toggle = new("UltimateGlorpExplorer Toggle",
+                "The key to enable or disable devUltimateGlorpExplorer's menu and features.",
                 KeyCode.F7);
 
             Hide_On_Startup = new("Hide On Startup",
-                "Should UnityExplorer be hidden on startup?",
-                false);
+                "Should UltimateGlorpExplorer be hidden on startup?",
+                true);
 
             Startup_Delay_Time = new("Startup Delay Time",
                 "The delay on startup before the UI is created.",
                 1f);
 
             Target_Display = new("Target Display",
-                "The monitor index for UnityExplorer to use, if you have multiple. 0 is the default display, 1 is secondary, etc. " +
+                "The monitor index for UltimateGlorpExplorer to use, if you have multiple. 0 is the default display, 1 is secondary, etc. " +
                 "Restart recommended when changing this setting. Make sure your extra monitors are the same resolution as your primary monitor.",
                 0);
 
             Force_Unlock_Mouse = new("Force Unlock Mouse",
-                "Force the Cursor to be unlocked (visible) when the UnityExplorer menu is open.",
+                "Force the Cursor to be unlocked (visible) when the UltimateGlorpExplorer menu is open.",
                 true);
             Force_Unlock_Mouse.OnValueChanged += (bool value) => UniverseLib.Config.ConfigManager.Force_Unlock_Mouse = value;
 
             Force_Unlock_Toggle = new("Force Unlock Toggle Key",
-                "The keybind to toggle the 'Force Unlock Mouse' setting. Only usable when UnityExplorer is open.",
+                "The keybind to toggle the 'Force Unlock Mouse' setting. Only usable when UltimateGlorpExplorer is open.",
                 KeyCode.None);
 
             Disable_EventSystem_Override = new("Disable EventSystem override",
@@ -106,7 +106,7 @@ namespace UnityExplorer.Config
             Disable_EventSystem_Override.OnValueChanged += (bool value) => UniverseLib.Config.ConfigManager.Disable_EventSystem_Override = value;
 
             Default_Output_Path = new("Default Output Path",
-                "The default output path when exporting things from UnityExplorer.",
+                "The default output path when exporting things from UltimateGlorpExplorer.",
                 Path.Combine(ExplorerCore.ExplorerFolder, "Output"));
 
             DnSpy_Path = new("dnSpy Path",
@@ -114,11 +114,11 @@ namespace UnityExplorer.Config
                 @"C:/Program Files/dnspy/dnSpy.exe");
 
             Main_Navbar_Anchor = new("Main Navbar Anchor",
-                "The vertical anchor of the main UnityExplorer Navbar, in case you want to move it.",
+                "The vertical anchor of the main UltimateGlorpExplorer Navbar, in case you want to move it.",
                 UIManager.VerticalAnchor.Top);
 
             Log_Unity_Debug = new("Log Unity Debug",
-                "Should UnityEngine.Debug.Log messages be printed to UnityExplorer's log?",
+                "Should UnityEngine.Debug.Log messages be printed to UltimateGlorpExplorer's log?",
                 false);
 
             World_MouseInspect_Keybind = new("World Mouse-Inspect Keybind",
@@ -129,7 +129,7 @@ namespace UnityExplorer.Config
                 "Optional keybind to begin a UI-mode Mouse Inspect.",
                 KeyCode.None);
 
-            CSConsole_Assembly_Blacklist = new("CSharp Console Assembly Blacklist", 
+            CSConsole_Assembly_Blacklist = new("CSharp Console Assembly Blacklist",
                 "Use this to blacklist Assembly names from being referenced by the C# Console. Requires a Reset of the C# Console.\n" +
                 "Separate each Assembly with a semicolon ';'." +
                 "For example, to blacklist Assembly-CSharp, you would add 'Assembly-CSharp;'",

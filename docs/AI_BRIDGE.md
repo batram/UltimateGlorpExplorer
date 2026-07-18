@@ -167,7 +167,7 @@ Via MCP against the proxy:
 ### Restart resilience
 
 Hooks and observers are in-memory. Persist agent setup by writing C# to
-`<game>\BepInEx\plugins\zmarn-dev-UnityExplorer\Scripts\startup.cs` — it runs on every boot.
+`<game>\BepInEx\plugins\zmarn-dev-UltimateGlorpExplorer\Scripts\startup.cs` — it runs on every boot.
 
 ## Repo layout
 

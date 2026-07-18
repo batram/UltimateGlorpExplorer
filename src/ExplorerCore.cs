@@ -21,11 +21,11 @@ namespace UnityExplorer
         public const string NAME = "UltimateGlorpExplorer";
         public const string VERSION = "4.9.0";
         public const string AUTHOR = "batram";
-        public const string GUID = "com.zmarn.unityexplorer";
+        public const string GUID = "com.zmarn.UltimateGlorpExplorer";
 
         public static IExplorerLoader Loader { get; private set; }
         public static string ExplorerFolder => Path.Combine(Loader.ExplorerFolderDestination, Loader.ExplorerFolderName);
-        public const string DEFAULT_EXPLORER_FOLDER_NAME = "zmarn-dev-UnityExplorer";
+        public const string DEFAULT_EXPLORER_FOLDER_NAME = "zmarn-dev-UltimateGlorpExplorer";
 
         public static HarmonyLib.Harmony Harmony { get; } = new HarmonyLib.Harmony(GUID);
 
@@ -41,7 +41,8 @@ namespace UnityExplorer
 
             Log($"{NAME} {VERSION} initializing...");
 
-            CheckLegacyExplorerFolder();
+            CheckLegacyExplorerFolder("UnityExplorer");
+            CheckLegacyExplorerFolder("zmarn-dev-UnityExplorer");
             Directory.CreateDirectory(ExplorerFolder);
             ConfigManager.Init(Loader.ConfigHandler);
 
@@ -147,12 +148,12 @@ namespace UnityExplorer
         #region LEGACY FOLDER MIGRATION
 
         // Can be removed eventually. For migration from <4.7.0
-        static void CheckLegacyExplorerFolder()
+        static void CheckLegacyExplorerFolder(string legacyFolderName)
         {
-            string legacyPath = Path.Combine(Loader.ExplorerFolderDestination, "UnityExplorer");
+            string legacyPath = Path.Combine(Loader.ExplorerFolderDestination, legacyFolderName);
             if (Directory.Exists(legacyPath))
             {
-                LogWarning($"Attempting to migrate old 'UnityExplorer/' folder to '{DEFAULT_EXPLORER_FOLDER_NAME}/'...");
+                LogWarning($"Attempting to migrate old '{legacyFolderName}/' folder to '{DEFAULT_EXPLORER_FOLDER_NAME}/'...");
 
                 // If new folder doesn't exist yet, let's just use Move().
                 if (!Directory.Exists(ExplorerFolder))
@@ -187,9 +188,21 @@ namespace UnityExplorer
         {
             Directory.CreateDirectory(target.FullName);
 
-            // Copy each file into it's new directory.
+            // Move each file, resolving collisions by keeping the newer copy.
             foreach (FileInfo fi in source.GetFiles())
-                fi.MoveTo(Path.Combine(target.ToString(), fi.Name));
+            {
+                string destination = Path.Combine(target.FullName, fi.Name);
+                if (!File.Exists(destination))
+                {
+                    fi.MoveTo(destination);
+                    continue;
+                }
+
+                if (fi.LastWriteTimeUtc > File.GetLastWriteTimeUtc(destination))
+                    fi.CopyTo(destination, true);
+
+                fi.Delete();
+            }
 
             // Copy each subdirectory using recursion.
             foreach (DirectoryInfo diSourceSubDir in source.GetDirectories())

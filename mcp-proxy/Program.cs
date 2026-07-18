@@ -215,7 +215,7 @@ async Task HandleToolCallAsync(HttpListenerContext ctx, JsonNode req, JsonNode i
                 lines = Math.Clamp(lines, 10, 1000);
                 JsonObject result = new();
                 result["note"] = "Log tails from disk; readable even when the game is down or crashed.";
-                AddLogTail(result, "unityexplorer", NewestFile(Path.Combine(gameDir, @"BepInEx\plugins\zmarn-dev-UnityExplorer\Logs")), lines);
+                AddLogTail(result, "unityexplorer", NewestFile(Path.Combine(gameDir, @"BepInEx\plugins\zmarn-dev-UltimateGlorpExplorer\Logs")), lines);
                 AddLogTail(result, "bepinex", Path.Combine(gameDir, @"BepInEx\LogOutput.log"), lines);
                 AddLogTail(result, "unity_player", Path.Combine(gameDir, "output_log.txt"), lines);
                 await RespondAsync(ctx, 200, RpcResult(id, ToolResult(result.ToJsonString(), false)).ToJsonString());

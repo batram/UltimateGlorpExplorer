@@ -219,7 +219,7 @@ the file is locked while any instance runs.
 
 **Restart resilience:** hooks and observers are in-memory and lost on restart.
 To persist setup across restarts, write it as C# to
-`<game>\BepInEx\plugins\zmarn-dev-UnityExplorer\Scripts\startup.cs` — UltimateGlorpExplorer
+`<game>\BepInEx\plugins\zmarn-dev-UltimateGlorpExplorer\Scripts\startup.cs` — UltimateGlorpExplorer
 executes it on every boot.
 
 ## Typical debugging loop
