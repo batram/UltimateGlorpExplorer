@@ -1,5 +1,5 @@
 <p align="center">
-  <img align="center" src="https://cdn.discordapp.com/emojis/1488767197277847583.webp" width="128" alt="glorb">
+  <img align="center" src="img/glorb.webp" width="128" alt="glorb">
 </p>
 
 <h1 align="center">UltimateGlorpExplorer</h1>
