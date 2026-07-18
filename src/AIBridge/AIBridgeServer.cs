@@ -117,6 +117,9 @@ namespace UnityExplorer.AIBridge
                                 "POST /execute - body is raw C#, evaluated in the REPL",
                                 "GET /logs?since=N - log entries from index N",
                                 "GET /screenshot?max=N - PNG screenshot of the game (max = optional max dimension, 0 = full)",
+                                "GET /texture?id=N - export a Texture2D (or a Sprite/Material/Renderer's texture) as PNG",
+                                "POST /texture/replace?id=N - body is raw PNG bytes, replaces the texture in place (LoadImage)",
+                                "GET /sprites?texture_id=N&png=0|1 - sprite-sheet manifest (name/rect/pivot/PPU per sprite), optionally with the PNG as base64",
                             }
                         },
                     });
@@ -354,6 +357,60 @@ namespace UnityExplorer.AIBridge
                         int maxDim = ParseIntParam(ctx, "max", 0); // 0 = full resolution
                         byte[] png = (byte[])MainThreadDispatcher.RunAtEndOfFrame(() => CaptureScreenshotPng(maxDim), DISPATCH_TIMEOUT_MS);
                         TryRespondBytes(ctx, 200, "image/png", png);
+                        return;
+                    }
+
+                case "/texture":
+                    {
+                        int texId = ParseIntParam(ctx, "id", 0);
+                        if (texId == 0)
+                        {
+                            TryRespond(ctx, 400, Error("Provide ?id=<instance id of a Texture2D, Sprite, Material, SpriteRenderer or Image>."));
+                            return;
+                        }
+                        byte[] png = (byte[])MainThreadDispatcher.Run(() => TextureTools.ExportTexturePng(texId), DISPATCH_TIMEOUT_MS);
+                        TryRespondBytes(ctx, 200, "image/png", png);
+                        return;
+                    }
+
+                case "/texture/replace":
+                    {
+                        if (ctx.Request.HttpMethod != "POST")
+                        {
+                            TryRespond(ctx, 405, Error("Use POST with raw PNG bytes as the request body (curl --data-binary @sheet.png)."));
+                            return;
+                        }
+                        int texId = ParseIntParam(ctx, "id", 0);
+                        if (texId == 0)
+                        {
+                            TryRespond(ctx, 400, Error("Provide ?id=<texture instance id>."));
+                            return;
+                        }
+                        byte[] png;
+                        using (MemoryStream ms = new())
+                        {
+                            byte[] buffer = new byte[81920];
+                            int read;
+                            while ((read = ctx.Request.InputStream.Read(buffer, 0, buffer.Length)) > 0)
+                                ms.Write(buffer, 0, read);
+                            png = ms.ToArray();
+                        }
+                        object result = MainThreadDispatcher.Run(() => TextureTools.ReplaceTexture(texId, png), DISPATCH_TIMEOUT_MS);
+                        TryRespond(ctx, 200, result);
+                        return;
+                    }
+
+                case "/sprites":
+                    {
+                        int texId = ParseIntParam(ctx, "texture_id", ParseIntParam(ctx, "id", 0));
+                        if (texId == 0)
+                        {
+                            TryRespond(ctx, 400, Error("Provide ?texture_id=<instance id of the sheet texture (or a Sprite on it)>."));
+                            return;
+                        }
+                        bool includePng = ParseIntParam(ctx, "png", 0) != 0;
+                        object result = MainThreadDispatcher.Run(() => TextureTools.ExportSprites(texId, includePng), DISPATCH_TIMEOUT_MS);
+                        TryRespond(ctx, 200, result);
                         return;
                     }
 

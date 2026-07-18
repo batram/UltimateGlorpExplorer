@@ -284,6 +284,38 @@ namespace UnityExplorer.AIBridge
                         ["max"] = Prop("integer", "Max width/height in pixels; image is scaled down to fit. 0 = full resolution (default 1280)."),
                     }),
 
+                Tool("export_texture",
+                    "Export a texture from the running game as PNG (base64 in the response — no shared filesystem needed). " +
+                    "Pass the instance id of a Texture2D, or of a Sprite/Material/SpriteRenderer/Image to take its texture. " +
+                    "Handles non-CPU-readable game textures via a GPU blit. " +
+                    "Decode png_base64 and write it to a local file to edit it.",
+                    new JObject
+                    {
+                        ["id"] = Prop("integer", "Instance id of the texture (or a Sprite/Material/renderer holding it)."),
+                    }, "id"),
+
+                Tool("replace_texture",
+                    "Replace a live texture's pixels in place from PNG data (base64). Every renderer, material, sprite and prefab " +
+                    "referencing that Texture2D instance updates immediately — animations and atlas rects stay intact if the " +
+                    "replacement has the same dimensions. Ideal for reskinning sprite sheets exported with export_texture/export_sprites. " +
+                    "Changes are lost on game restart.",
+                    new JObject
+                    {
+                        ["id"] = Prop("integer", "Instance id of the target Texture2D (or a Sprite/Material/renderer holding it)."),
+                        ["png_base64"] = Prop("string", "PNG file contents, base64-encoded."),
+                    }, "id", "png_base64"),
+
+                Tool("export_sprites",
+                    "Export a sprite sheet: the texture as PNG (base64, optional) plus a manifest of every Sprite on it — " +
+                    "name, rect (Unity bottom-left origin AND pngRect with top-left origin for direct PNG pixel coords), " +
+                    "pivot, pixelsPerUnit, 9-slice border. Everything needed to edit or rebuild the sheet correctly. " +
+                    "Pass the texture's instance id, or a Sprite's id to resolve its sheet.",
+                    new JObject
+                    {
+                        ["texture_id"] = Prop("integer", "Instance id of the sheet texture (or of a Sprite on it)."),
+                        ["include_png"] = Prop("boolean", "Include the sheet PNG as png_base64 (default true). Set false for manifest-only (cheaper)."),
+                    }, "texture_id"),
+
                 Tool("get_logs",
                     "Read the UnityExplorer log (incl. Unity Debug.Log if the 'Log Unity Debug' config is enabled, " +
                     "and output from your own execute_csharp Debug.Log calls). " +
@@ -458,6 +490,41 @@ namespace UnityExplorer.AIBridge
                                 },
                                 ["isError"] = false,
                             });
+                        }
+                    case "export_texture":
+                        {
+                            int? texId = args.Value<int?>("id");
+                            if (texId == null)
+                                return RpcError(id, -32602, "Missing required argument 'id'.");
+                            result = MainThreadDispatcher.Run(() => TextureTools.ExportTexture(texId.Value), AIBridgeServer.DISPATCH_TIMEOUT_MS);
+                            break;
+                        }
+                    case "replace_texture":
+                        {
+                            int? texId = args.Value<int?>("id");
+                            string pngBase64 = args.Value<string>("png_base64");
+                            if (texId == null || string.IsNullOrEmpty(pngBase64))
+                                return RpcError(id, -32602, "Missing required arguments 'id' and/or 'png_base64'.");
+                            byte[] png;
+                            try
+                            {
+                                png = Convert.FromBase64String(pngBase64);
+                            }
+                            catch (FormatException)
+                            {
+                                return RpcError(id, -32602, "'png_base64' is not valid base64.");
+                            }
+                            result = MainThreadDispatcher.Run(() => TextureTools.ReplaceTexture(texId.Value, png), AIBridgeServer.DISPATCH_TIMEOUT_MS);
+                            break;
+                        }
+                    case "export_sprites":
+                        {
+                            int? texId = args.Value<int?>("texture_id");
+                            if (texId == null)
+                                return RpcError(id, -32602, "Missing required argument 'texture_id'.");
+                            bool includePng = args.Value<bool?>("include_png") ?? true;
+                            result = MainThreadDispatcher.Run(() => TextureTools.ExportSprites(texId.Value, includePng), AIBridgeServer.DISPATCH_TIMEOUT_MS);
+                            break;
                         }
                     case "get_logs":
                         {

@@ -158,6 +158,12 @@ async Task HandleToolCallAsync(HttpListenerContext ctx, JsonNode req, JsonNode i
                     await RespondAsync(ctx, 200, RpcResult(id, ToolResult($"Game exe not found: {gameExe} (set UCH_DIR env var).", true)).ToJsonString());
                     return;
                 }
+                string setupError = SanityCheckModSetup(out string setupWarning);
+                if (setupError != null)
+                {
+                    await RespondAsync(ctx, 200, RpcResult(id, ToolResult($"Not launching: {setupError}", true)).ToJsonString());
+                    return;
+                }
                 List<int> pids = new();
                 for (int i = 0; i < count; i++)
                 {
@@ -166,9 +172,11 @@ async Task HandleToolCallAsync(HttpListenerContext ctx, JsonNode req, JsonNode i
                     if (count > 1)
                         await Task.Delay(1500); // stagger so port scan order is deterministic
                 }
-                await RespondAsync(ctx, 200, RpcResult(id, ToolResult(
-                    $"Launched {count} instance(s), pid(s): {string.Join(", ", pids)}. " +
-                    "Bridges come up ~5-15s after launch; poll list_instances.", false)).ToJsonString());
+                string launchMsg = $"Launched {count} instance(s), pid(s): {string.Join(", ", pids)}. " +
+                    "Bridges come up ~5-15s after launch; poll list_instances.";
+                if (setupWarning != null)
+                    launchMsg += $"\nWARNING: {setupWarning}";
+                await RespondAsync(ctx, 200, RpcResult(id, ToolResult(launchMsg, false)).ToJsonString());
                 return;
             }
 
@@ -340,6 +348,82 @@ async Task<bool> TryForwardAsync(HttpListenerContext ctx, int port, string body)
     {
         return false;
     }
+}
+
+// Pre-launch sanity check: is the UnityExplorer bridge DLL actually going to load?
+// Returns an error string (don't launch) or null; 'warning' carries non-fatal issues.
+string SanityCheckModSetup(out string warning)
+{
+    warning = null;
+
+    // 1. BepInEx doorstop present and enabled (BepInEx 5 on Windows = winhttp.dll + doorstop_config.ini).
+    if (!File.Exists(Path.Combine(gameDir, "winhttp.dll")))
+        return $"BepInEx doorstop (winhttp.dll) not found in {gameDir} — BepInEx is not installed, no plugin will load.";
+    string doorstopIni = Path.Combine(gameDir, "doorstop_config.ini");
+    if (File.Exists(doorstopIni))
+    {
+        foreach (string line in File.ReadAllLines(doorstopIni))
+        {
+            string trimmed = line.Trim();
+            if (trimmed.StartsWith("enabled", StringComparison.OrdinalIgnoreCase)
+                && trimmed.Contains('=')
+                && trimmed.Split('=')[1].Trim().Equals("false", StringComparison.OrdinalIgnoreCase))
+                return $"Doorstop is disabled (enabled=false in {doorstopIni}) — BepInEx will not load.";
+        }
+    }
+
+    // 2. Our DLL present in BepInEx\plugins (root or any subfolder).
+    string pluginsDir = Path.Combine(gameDir, @"BepInEx\plugins");
+    if (!Directory.Exists(pluginsDir))
+        return $"BepInEx plugins directory not found: {pluginsDir}";
+    string deployedDll = Directory.GetFiles(pluginsDir, "UnityExplorer*.dll", SearchOption.AllDirectories)
+        .OrderByDescending(File.GetLastWriteTimeUtc)
+        .FirstOrDefault();
+    if (deployedDll == null)
+        return $"No UnityExplorer*.dll found under {pluginsDir} — deploy the mod DLL first " +
+            @"(build_uch.ps1, then copy Release\UnityExplorer.BepInEx5.Mono\UnityExplorer.BIE5.Mono.dll there).";
+
+    // 3. AI bridge not disabled in the UnityExplorer config (missing cfg = defaults = enabled).
+    string cfg = Path.Combine(gameDir, @"BepInEx\config\com.sinai.unityexplorer.cfg");
+    if (File.Exists(cfg))
+    {
+        foreach (string line in File.ReadAllLines(cfg))
+        {
+            string trimmed = line.Trim();
+            if (trimmed.StartsWith("AI Bridge Port", StringComparison.OrdinalIgnoreCase) && trimmed.Contains('='))
+            {
+                string value = trimmed.Split('=')[1].Trim();
+                if (int.TryParse(value, out int cfgPort) && cfgPort <= 0)
+                    return $"AI Bridge is disabled ('AI Bridge Port = {cfgPort}' in {cfg}) — the game would start without the bridge.";
+                break;
+            }
+        }
+    }
+
+    // 4. Non-fatal: deployed DLL older than the freshly built one in the repo's Release folder.
+    string repoDll = FindRepoBuildDll();
+    if (repoDll != null && File.GetLastWriteTimeUtc(repoDll) > File.GetLastWriteTimeUtc(deployedDll).AddSeconds(2))
+        warning = $"Deployed DLL ({deployedDll}, {File.GetLastWriteTimeUtc(deployedDll):u}) is older than the last build " +
+            $"({repoDll}, {File.GetLastWriteTimeUtc(repoDll):u}) — kill_game, copy the new DLL, launch again if you meant to test new code.";
+
+    return null;
+}
+
+// Walks up from the proxy binary looking for the repo's built DLL (best effort).
+static string FindRepoBuildDll()
+{
+    try
+    {
+        DirectoryInfo dir = new(AppContext.BaseDirectory);
+        for (int i = 0; i < 6 && dir != null; i++, dir = dir.Parent)
+        {
+            string candidate = Path.Combine(dir.FullName, @"Release\UnityExplorer.BepInEx5.Mono\UnityExplorer.BIE5.Mono.dll");
+            if (File.Exists(candidate))
+                return candidate;
+        }
+    }
+    catch { }
+    return null;
 }
 
 static void AddLogTail(JsonObject result, string key, string path, int lines)

@@ -66,8 +66,16 @@ Config: "AI Bridge Port" in `BepInEx\config\com.sinai.unityexplorer.cfg` (0 disa
 | `inspect_at` | `GET /inspect_at?x&y` | World raycast: "what's at this pixel?" |
 | `screenshot` | `GET /screenshot?max` | PNG of the game (MCP returns inline image) |
 | `freecam` | `GET /freecam` | Toggle/position the free camera |
+| `export_texture` | `GET /texture?id` | Export any texture as PNG (id may be a Sprite/Material/renderer) |
+| `replace_texture` | `POST /texture/replace?id` | Load PNG into the live Texture2D in place — instant reskin |
+| `export_sprites` | `GET /sprites?texture_id` | Sprite-sheet manifest: name, rect (+ PNG-space rect), pivot, PPU, border |
 | `get_logs` | `GET /logs?since` | Log tail with cursor + utc timestamps |
 | *proxy:* `list_instances`, `launch_game`, `kill_game`, `postmortem` | — | Lifecycle & crash forensics, work with zero instances |
+
+`launch_game` sanity-checks the mod setup before starting: it refuses to launch if the
+BepInEx doorstop (`winhttp.dll`) is missing/disabled, the UnityExplorer DLL is absent from
+`BepInEx\plugins`, or the AI bridge port is set to 0 in the config — and it warns (but still
+launches) when the deployed DLL is older than the repo's last build, i.e. you forgot to redeploy.
 
 ## Worked examples
 
@@ -113,6 +121,31 @@ curl "http://127.0.0.1:7311/events?since=0"           # every change, with frame
 curl -X POST --data 'GameControl.Instance != null' \
      "http://127.0.0.1:7311/wait_for?timeout=60000"
 ```
+
+### Reskin a sprite sheet (texture pipeline)
+
+```bash
+# 1. find the sheet: any Sprite/Material/SpriteRenderer id resolves to its texture
+curl "http://127.0.0.1:7311/search?name=blockDirt&type=Sprite"
+
+# 2. export the PNG + a manifest of every sprite on the sheet
+curl -o sheet.png "http://127.0.0.1:7311/texture?id=-4242"
+curl "http://127.0.0.1:7311/sprites?texture_id=-4242"
+#   manifest gives pngRect (top-left origin) per sprite = exact PNG pixel coords to edit
+
+# 3. edit sheet.png locally, then push it back into the live texture
+curl -X POST --data-binary @sheet.png "http://127.0.0.1:7311/texture/replace?id=-4242"
+
+# 4. verify
+curl -o after.png "http://127.0.0.1:7311/screenshot?max=1280"
+```
+
+Replacing the *texture* (not individual `sprite` references) is the key: systems that
+re-apply sprites every frame (e.g. character outfits) keep pointing at the same
+Texture2D instance, so the new pixels show up everywhere immediately with animation
+intact. The MCP tools (`export_texture`/`replace_texture`/`export_sprites`) carry the
+PNG as base64 inside the response, so a remote/tunneled agent needs no file access to
+the game machine. Changes are in-memory; persist via `Scripts\startup.cs` (below).
 
 ### Networked-mod loop (multiple instances)
 

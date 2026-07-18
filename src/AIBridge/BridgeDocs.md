@@ -15,7 +15,8 @@ game state and execute C# inside the running game.
   - MCP tools: `get_scene`, `inspect_gameobject`, `inspect_type`, `inspect_id`, `find_objects`,
     `execute_csharp`, `create_hook`, `list_hooks`, `toggle_hook`, `delete_hook`, `watch`,
     `create_observer`, `list_observers`, `delete_observer`, `get_events`, `wait_for`,
-    `inspect_at`, `freecam`, `screenshot`, `get_logs` (parameters mirror the REST endpoints below).
+    `inspect_at`, `freecam`, `screenshot`, `export_texture`, `replace_texture`, `export_sprites`,
+    `get_logs` (parameters mirror the REST endpoints below).
 
 ## Endpoints
 
@@ -159,6 +160,34 @@ maximum width/height (image is scaled down to fit); omit or 0 for full
 resolution. Also available as the MCP tool `screenshot` (returns inline image
 content, default max 1280).
 
+### Textures & sprite sheets — export, edit, replace
+```
+curl -o sheet.png "http://127.0.0.1:7311/texture?id=-1234"          # export as PNG
+curl "http://127.0.0.1:7311/sprites?texture_id=-1234"               # sprite manifest (add &png=1 for base64 PNG inline)
+curl -X POST --data-binary @sheet.png "http://127.0.0.1:7311/texture/replace?id=-1234"
+```
+- `/texture?id=` exports any Texture2D as PNG. The id may also be a Sprite,
+  Material, SpriteRenderer or UI.Image — the underlying texture is resolved.
+  Non-CPU-readable game textures are handled via a GPU blit.
+- `/sprites?texture_id=` dumps a manifest of every Sprite on that sheet: name, id,
+  `rect` (Unity convention, origin **bottom-left**), `pngRect` (origin **top-left** —
+  directly usable as PNG pixel coordinates), pivot (pixels + normalized),
+  `pixelsPerUnit` and 9-slice `border`. Everything needed to edit a sheet and put
+  each frame back in the right place.
+- `POST /texture/replace?id=` loads PNG bytes into the **existing** Texture2D
+  instance (LoadImage), so every renderer, material, sprite and prefab clone that
+  references it updates immediately — animation and atlas rects stay intact if the
+  replacement keeps the original dimensions. In-memory only; lost on restart
+  (re-apply from `Scripts\startup.cs` to persist).
+- All data travels over HTTP (raw PNG on REST, base64 on the MCP tools), so the
+  agent does not need filesystem access to the game machine.
+
+Typical reskin loop: `find_objects`/`inspect` to get the sheet texture id →
+`/sprites?texture_id=` for manifest + PNG → edit locally → `POST /texture/replace`
+→ `/screenshot` to verify. Note: character outfits re-apply sprites every frame
+from the sheet, which is exactly why replacing the *texture* works while swapping
+individual `sprite` references gets reverted.
+
 ### GET /logs?since=N — UnityExplorer + Unity log tail
 `curl "http://127.0.0.1:7311/logs?since=120"`
 
@@ -178,7 +207,10 @@ Log entries and observer events also carry `utc` timestamps so you can correlate
 Via the proxy (port 7312), use `list_instances` to enumerate running instances and
 pass `_port` on any game tool to target a specific one. `launch_game(count)`,
 `kill_game` and `postmortem` (disk log tails, works when the game is dead) are
-served by the proxy itself. Kill all instances before redeploying the mod DLL —
+served by the proxy itself. `launch_game` refuses to start if the mod DLL is
+missing from `BepInEx\plugins`, BepInEx's doorstop is absent/disabled, or the
+bridge port is configured to 0 — and warns when the deployed DLL is older than
+the repo's last build (forgot to redeploy). Kill all instances before redeploying the mod DLL —
 the file is locked while any instance runs.
 
 **Restart resilience:** hooks and observers are in-memory and lost on restart.

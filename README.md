@@ -19,10 +19,12 @@ An **AI bridge** embedded in the game, plus **MCP (Modded Chicken Protocol)** �
 wire-compatible with Anthropic's [Model Context Protocol](https://modelcontextprotocol.io) — so
 Claude Code, Codex & friends can use the running game as a tool server:
 
-- **20 agent tools**: scene exploration, object/singleton search, live inspection (by path,
+- **23 agent tools**: scene exploration, object/singleton search, live inspection (by path,
   type, instance id, or screen pixel), a persistent C# REPL, Harmony method hooks with call
   tracing, per-frame watch/observers with an event buffer, blocking `wait_for`, screenshots,
-  freecam, and cursored logs — all self-documented at `GET /docs` by the running game.
+  freecam, a texture/sprite-sheet pipeline (export PNG + sprite manifest, replace textures
+  in place for live reskins), and cursored logs — all self-documented at `GET /docs` by the
+  running game.
 - **Always-on proxy** ([`mcp-proxy/`](mcp-proxy/)): hides game downtime from MCP clients and
   adds lifecycle tools — `launch_game`, `kill_game`, `list_instances`, crash `postmortem`.
 - **Multi-instance support** for networked-mod testing: run host + many clients, target each
