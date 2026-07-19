@@ -369,7 +369,12 @@ async Task HandleToolCallAsync(HttpListenerContext ctx, JsonNode req, JsonNode i
         }
         bool parsed = TryExtractExecOutcome(respBody, out bool execOk, out string resultSnippet);
         if (parsed && !execOk)
+        {
             LogCsharpFailure(port2, skillCode, resultSnippet);
+            string hint = GetFailureHint(resultSnippet);
+            if (hint != null)
+                respBody = AppendTextBlock(respBody, "Hint: " + hint);
+        }
         if (!string.IsNullOrWhiteSpace(skillTitle) && !string.IsNullOrWhiteSpace(skillCode))
         {
             if (parsed && execOk)
@@ -437,9 +442,14 @@ async Task HandleToolsListAsync(HttpListenerContext ctx, JsonNode id, string bod
                 ["description"] = "Target game instance port (from list_instances). Default: first alive instance.",
             };
 
-        // Skill-library capture fields on execute_csharp (stripped by the proxy before forwarding).
+        // Skill-library capture fields on execute_csharp (stripped by the proxy before forwarding),
+        // plus a pitfalls nudge on the description (top failure causes mined from session logs).
         if (props != null && tool?["name"]?.GetValue<string>() == "execute_csharp" && !props.ContainsKey("title"))
         {
+            tool["description"] = tool["description"]?.GetValue<string>() +
+                " Pitfalls: verify type and member names with inspect_type instead of guessing;" +
+                " avoid lambdas/LINQ capturing local variables (crashes the Mono REPL — use foreach);" +
+                " values of private/internal types can't be stored in REPL variables.";
             props["title"] = new JsonObject
             {
                 ["type"] = "string",
@@ -829,6 +839,26 @@ List<(string Slug, string Title, List<string> Tags, string Summary)> ListSkills(
         Console.WriteLine($"uch-mcp-proxy: list skills failed: {ex.Message}");
     }
     return skills;
+}
+
+// Error coach: recovery hints for the failure classes agents hit most, appended to
+// the response so they arrive exactly when needed (mined from session transcripts;
+// csharp-failures.jsonl tracks how often each class still fires).
+static string GetFailureHint(string error)
+{
+    if (error == null)
+        return null;
+    if (error.Contains("HoistedVariable") || error.Contains("InternalErrorException"))
+        return "Known Mono REPL limitation: lambdas/LINQ capturing local variables crash the evaluator. Rewrite with a foreach loop.";
+    if (error.Contains("' not found") && error.StartsWith("Type '"))
+        return "Type names must be exact. Use find_objects or inspect_type to discover the real name instead of guessing.";
+    if (error.Contains("CS0052") || error.Contains("Inconsistent accessibility"))
+        return "REPL variables become public fields, so values of private/internal types can't be stored in them. Use the value inline, or declare the variable as object.";
+    if (error.Contains("CS0103") && error.Contains("UltimateGlorpExplorer"))
+        return "The mod's own UltimateGlorpExplorer namespace is not loaded in the REPL; only game and Unity assemblies are referenced.";
+    if (error.Contains("CS1061"))
+        return "That member doesn't exist. Verify member names with inspect_type before using them.";
+    return null;
 }
 
 // Every failed execute_csharp run gets a JSONL record — first-party data for
