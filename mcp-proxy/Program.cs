@@ -15,8 +15,13 @@ using System.Threading.Tasks;
 // instances number contiguously from 7311). Game instances bind the first free
 // port in [BASE_UPSTREAM, BASE_UPSTREAM+32); the proxy scans that range and routes
 // each tools/call to a specific instance via an injected optional "_port" argument.
-// The proxy also answers four tools itself (they work with zero instances running):
-//   list_instances, launch_game, kill_game, postmortem
+// The proxy also answers seven tools itself (they work with zero instances running):
+//   list_instances, launch_game, kill_game, postmortem, save_skill, list_skills, get_skill
+//
+// Skill library: agents can save reusable C# snippets as human-readable markdown
+// files in skills/ next to the proxy exe — either explicitly via save_skill, or by
+// passing a title (plus optional tags/comment) to execute_csharp, in which case the
+// proxy strips those fields, forwards the code, and saves it only if the run succeeded.
 
 const int ListenPort = 7310;
 const int UpstreamBasePort = 7311;
@@ -26,6 +31,9 @@ string gameDir = Environment.GetEnvironmentVariable("UCH_DIR")
     ?? @"S:\SteamLibrary\steamapps\common\Ultimate Chicken Horse";
 string gameExe = Path.Combine(gameDir, "UltimateChickenHorse.exe");
 string cachePath = Path.Combine(AppContext.BaseDirectory, "tools-cache.json");
+string skillsDir = Path.Combine(AppContext.BaseDirectory, "skills");
+string failuresLogPath = Path.Combine(AppContext.BaseDirectory, "csharp-failures.jsonl");
+object skillWriteLock = new();
 
 HttpClient http = new() { Timeout = TimeSpan.FromSeconds(20) };
 HttpClient probe = new() { Timeout = TimeSpan.FromMilliseconds(800) };
@@ -96,7 +104,11 @@ async Task HandleAsync(HttpListenerContext ctx)
                         ["serverInfo"] = new JsonObject { ["name"] = "uch-ai-bridge-proxy", ["version"] = "2.0" },
                         ["instructions"] = "Tools for inspecting and scripting live Ultimate Chicken Horse game instances. " +
                             "No instance is currently running — use launch_game to start one (or more, for networked testing), " +
-                            "list_instances to see what's up, and pass _port on any game tool to target a specific instance.",
+                            "list_instances to see what's up, and pass _port on any game tool to target a specific instance. " +
+                        // Only seen when no instance is alive at connect time — otherwise initialize is
+                        // forwarded upstream and the game's instructions win (same as the _port guidance).
+                        "A skill library of reusable C# snippets is available: list_skills / get_skill to reuse, " +
+                        "save_skill (or execute_csharp with a title) to save.",
                     }).ToJsonString());
                     return;
                 }
@@ -154,7 +166,10 @@ async Task HandleToolCallAsync(HttpListenerContext ctx, JsonNode req, JsonNode i
             {
                 int count = (int?)args["count"]?.GetValue<double>() ?? 1;
                 count = Math.Clamp(count, 1, 32);
-                JsonArray commandLineArgs = args["args"] as JsonArray ?? new JsonArray();
+                // "game_args" preferred; legacy "args" still accepted. Renamed because agents
+                // wrapping tool calls in PowerShell kept mirroring the key as the automatic
+                // variable $args, which silently shadows function parameters.
+                JsonArray commandLineArgs = args["game_args"] as JsonArray ?? args["args"] as JsonArray ?? new JsonArray();
                 if (!File.Exists(gameExe))
                 {
                     await RespondAsync(ctx, 200, RpcResult(id, ToolResult($"Game exe not found: {gameExe} (set UCH_DIR env var).", true)).ToJsonString());
@@ -221,6 +236,70 @@ async Task HandleToolCallAsync(HttpListenerContext ctx, JsonNode req, JsonNode i
                 await RespondAsync(ctx, 200, RpcResult(id, ToolResult(result.ToJsonString(), false)).ToJsonString());
                 return;
             }
+
+        case "save_skill":
+            {
+                string title = ReadStringArg(args, "title");
+                string code = ReadStringArg(args, "code");
+                if (string.IsNullOrWhiteSpace(title) || string.IsNullOrWhiteSpace(code))
+                {
+                    await RespondAsync(ctx, 200, RpcResult(id, ToolResult("save_skill requires non-empty 'title' and 'code'.", true)).ToJsonString());
+                    return;
+                }
+                try
+                {
+                    (string slug, bool updated) = SaveSkill(title, code, ReadStringArrayArg(args, "tags"), ReadStringArg(args, "comment"), "save_skill", null);
+                    await RespondAsync(ctx, 200, RpcResult(id, ToolResult(
+                        $"{(updated ? "Updated" : "Saved")} skill '{slug}' ({Path.Combine(skillsDir, slug + ".md")}).", false)).ToJsonString());
+                }
+                catch (Exception ex)
+                {
+                    await RespondAsync(ctx, 200, RpcResult(id, ToolResult($"Failed to save skill: {ex.Message}", true)).ToJsonString());
+                }
+                return;
+            }
+
+        case "list_skills":
+            {
+                List<(string Slug, string Title, List<string> Tags, string Summary)> skills = ListSkills();
+                JsonArray skillArray = new();
+                foreach ((string slug, string title, List<string> tags, string summary) in skills)
+                {
+                    JsonArray tagArray = new();
+                    foreach (string tag in tags)
+                        tagArray.Add(tag);
+                    skillArray.Add(new JsonObject { ["slug"] = slug, ["title"] = title, ["tags"] = tagArray, ["summary"] = summary });
+                }
+                JsonObject listing = new() { ["count"] = skills.Count, ["skills"] = skillArray };
+                if (skills.Count == 0)
+                    listing["hint"] = "No skills saved yet. Save one via save_skill, or execute_csharp with a title.";
+                await RespondAsync(ctx, 200, RpcResult(id, ToolResult(listing.ToJsonString(), false)).ToJsonString());
+                return;
+            }
+
+        case "get_skill":
+            {
+                string name = ReadStringArg(args, "name");
+                if (string.IsNullOrWhiteSpace(name))
+                {
+                    await RespondAsync(ctx, 200, RpcResult(id, ToolResult("get_skill requires 'name' (slug or title, see list_skills).", true)).ToJsonString());
+                    return;
+                }
+                // Slugify is idempotent on slugs, so this resolves both raw titles and slugs
+                // (and keeps arbitrary client input from ever reaching the filesystem).
+                string skillPath = Path.Combine(skillsDir, Slugify(name) + ".md");
+                if (!File.Exists(skillPath))
+                {
+                    await RespondAsync(ctx, 200, RpcResult(id, ToolResult(
+                        $"No skill '{name}'. Available: [{string.Join(", ", ListSkills().Select(s => s.Slug))}]", true)).ToJsonString());
+                    return;
+                }
+                string skillText = File.ReadAllText(skillPath);
+                if (ParseSkillFile(skillPath) == null)
+                    skillText = "NOTE: this skill file did not parse cleanly (hand-edited?); raw content follows.\n\n" + skillText;
+                await RespondAsync(ctx, 200, RpcResult(id, ToolResult(skillText, false)).ToJsonString());
+                return;
+            }
     }
 
     // Game tools: route by _port (stripped before forwarding), default = first alive instance.
@@ -229,6 +308,28 @@ async Task HandleToolCallAsync(HttpListenerContext ctx, JsonNode req, JsonNode i
     {
         args.Remove("_port");
         req["params"]["arguments"] = args;
+    }
+
+    // execute_csharp skill capture: a title means "save this as a skill if it runs ok".
+    // The metadata fields are proxy-injected, so strip them even when title is absent —
+    // the game's REPL must never see them.
+    string skillTitle = null, skillComment = null, skillCode = null;
+    List<string> skillTags = null;
+    if (toolName == "execute_csharp")
+    {
+        skillCode = ReadStringArg(args, "code");
+        if (args.ContainsKey("title") || args.ContainsKey("tags") || args.ContainsKey("comment"))
+        {
+            skillTitle = ReadStringArg(args, "title");
+            skillComment = ReadStringArg(args, "comment");
+            skillTags = ReadStringArrayArg(args, "tags");
+            args.Remove("title");
+            args.Remove("tags");
+            args.Remove("comment");
+            req["params"]["arguments"] = args;
+            if (string.IsNullOrWhiteSpace(skillTitle))
+                Console.WriteLine("uch-mcp-proxy: execute_csharp had tags/comment but no title; not saving a skill");
+        }
     }
 
     List<(int Port, JsonNode Identity)> instances = await GetAliveInstancesAsync();
@@ -251,6 +352,44 @@ async Task HandleToolCallAsync(HttpListenerContext ctx, JsonNode req, JsonNode i
     {
         await RespondAsync(ctx, 200, RpcResult(id, ToolResult(
             "No game instance is running. Use launch_game to start one, then retry.", true)).ToJsonString());
+        return;
+    }
+
+    if (toolName == "execute_csharp")
+    {
+        // Need to inspect the game's response before replying, so bypass TryForwardAsync
+        // (which streams straight to the client): failed runs are appended to
+        // csharp-failures.jsonl, and a title means "save as a skill on confirmed ok:true".
+        string respBody = await ForwardForBodyAsync(port2, req.ToJsonString());
+        if (respBody == null)
+        {
+            await RespondAsync(ctx, 200, RpcResult(id, ToolResult(
+                $"Instance on port {port2} stopped responding mid-call.", true)).ToJsonString());
+            return;
+        }
+        bool parsed = TryExtractExecOutcome(respBody, out bool execOk, out string resultSnippet);
+        if (parsed && !execOk)
+            LogCsharpFailure(port2, skillCode, resultSnippet);
+        if (!string.IsNullOrWhiteSpace(skillTitle) && !string.IsNullOrWhiteSpace(skillCode))
+        {
+            if (parsed && execOk)
+            {
+                try
+                {
+                    (string slug, bool updated) = SaveSkill(skillTitle, skillCode, skillTags, skillComment, "execute_csharp", resultSnippet);
+                    respBody = AppendTextBlock(respBody, $"{(updated ? "Updated" : "Saved")} skill '{slug}'.");
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"uch-mcp-proxy: skill save failed: {ex.Message}");
+                }
+            }
+            else
+            {
+                Console.WriteLine($"uch-mcp-proxy: execute_csharp did not succeed; skill '{skillTitle}' not saved");
+            }
+        }
+        await RespondAsync(ctx, 200, respBody);
         return;
     }
 
@@ -297,6 +436,28 @@ async Task HandleToolsListAsync(HttpListenerContext ctx, JsonNode id, string bod
                 ["type"] = "integer",
                 ["description"] = "Target game instance port (from list_instances). Default: first alive instance.",
             };
+
+        // Skill-library capture fields on execute_csharp (stripped by the proxy before forwarding).
+        if (props != null && tool?["name"]?.GetValue<string>() == "execute_csharp" && !props.ContainsKey("title"))
+        {
+            props["title"] = new JsonObject
+            {
+                ["type"] = "string",
+                ["description"] = "If set, saves this code to the proxy skill library after a successful run. " +
+                    "Prefer saving parameterizable, scene-independent, reusable snippets.",
+            };
+            props["tags"] = new JsonObject
+            {
+                ["type"] = "array",
+                ["items"] = new JsonObject { ["type"] = "string" },
+                ["description"] = "Skill library tags (only used with title).",
+            };
+            props["comment"] = new JsonObject
+            {
+                ["type"] = "string",
+                ["description"] = "Usage notes stored with the skill: what it does, parameters to tweak, assumptions (only used with title).",
+            };
+        }
     }
 
     // Proxy-local tools, available even with zero instances.
@@ -309,7 +470,7 @@ async Task HandleToolsListAsync(HttpListenerContext ctx, JsonNode id, string bod
         new JsonObject
         {
             ["count"] = new JsonObject { ["type"] = "integer", ["description"] = "Instances to launch (default 1, max 32)." },
-            ["args"] = new JsonObject
+            ["game_args"] = new JsonObject
             {
                 ["type"] = "array",
                 ["items"] = new JsonObject { ["type"] = "string" },
@@ -323,6 +484,27 @@ async Task HandleToolsListAsync(HttpListenerContext ctx, JsonNode id, string bod
         "Read log tails from disk (UnityExplorer, BepInEx, Unity player) — works even when the game is down, hung or crashed. " +
         "First stop after an unexpected death.",
         new JsonObject { ["lines"] = new JsonObject { ["type"] = "integer", ["description"] = "Tail length per log (default 100, max 1000)." } }));
+    tools.Add(ProxyTool("save_skill",
+        "Save a C# snippet to the proxy skill library without executing it (stored as markdown next to the proxy). " +
+        "Prefer parameterizable, scene-independent, reusable code. Overwrites an existing skill with the same slug.",
+        new JsonObject
+        {
+            ["title"] = new JsonObject { ["type"] = "string", ["description"] = "Skill name; becomes the filename slug. Required." },
+            ["code"] = new JsonObject { ["type"] = "string", ["description"] = "The C# code. Required." },
+            ["tags"] = new JsonObject
+            {
+                ["type"] = "array",
+                ["items"] = new JsonObject { ["type"] = "string" },
+                ["description"] = "Tags for discovery.",
+            },
+            ["comment"] = new JsonObject { ["type"] = "string", ["description"] = "Usage notes: what it does, parameters to tweak, assumptions." },
+        }));
+    tools.Add(ProxyTool("list_skills",
+        "List saved skills (slug, title, tags, one-line summary). Skills are reusable execute_csharp snippets; fetch one with get_skill.",
+        new JsonObject()));
+    tools.Add(ProxyTool("get_skill",
+        "Fetch a saved skill's full markdown (code + usage notes).",
+        new JsonObject { ["name"] = new JsonObject { ["type"] = "string", ["description"] = "Skill slug or title from list_skills." } }));
 
     await RespondAsync(ctx, 200, RpcResult(id, new JsonObject { ["tools"] = CloneNode(tools) }).ToJsonString());
 }
@@ -481,6 +663,273 @@ static string NewestFile(string dir)
         return Directory.GetFiles(dir).OrderByDescending(File.GetLastWriteTimeUtc).FirstOrDefault();
     }
     catch { return null; }
+}
+
+// ---- Skill library: markdown files in skills/ next to the proxy exe. ----------------
+// Format: `---` frontmatter (title, tags, created, updated, source), a fenced csharp
+// block, free-form comment text, optional trailing `<!-- last-result: ... -->`.
+// Files are meant to be hand-editable; parsing degrades instead of throwing.
+
+// The slug is the only string that ever touches the filesystem. Idempotent on its own output.
+static string Slugify(string title)
+{
+    StringBuilder sb = new();
+    bool lastDash = true;
+    foreach (char c in (title ?? "").ToLowerInvariant())
+    {
+        if (char.IsLetterOrDigit(c)) { sb.Append(c); lastDash = false; }
+        else if (!lastDash) { sb.Append('-'); lastDash = true; }
+        if (sb.Length >= 64) break;
+    }
+    string slug = sb.ToString().Trim('-');
+    if (slug.Length == 0)
+        return "skill";
+    string[] reserved = { "con", "prn", "aux", "nul",
+        "com1", "com2", "com3", "com4", "com5", "com6", "com7", "com8", "com9",
+        "lpt1", "lpt2", "lpt3", "lpt4", "lpt5", "lpt6", "lpt7", "lpt8", "lpt9" };
+    return reserved.Contains(slug) ? "skill-" + slug : slug;
+}
+
+(string Slug, bool Updated) SaveSkill(string title, string code, List<string> tags, string comment, string source, string resultSnippet)
+{
+    Directory.CreateDirectory(skillsDir);
+    string slug = Slugify(title);
+    string path = Path.Combine(skillsDir, slug + ".md");
+    bool updated = File.Exists(path);
+    string now = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ");
+    string created = now;
+    if (updated)
+    {
+        (string Title, List<string> Tags, string Created, string Code, string Comment)? existing = ParseSkillFile(path);
+        if (!string.IsNullOrEmpty(existing?.Created))
+            created = existing.Value.Created;
+        if (existing != null && existing.Value.Title != title)
+            Console.WriteLine($"uch-mcp-proxy: skill '{slug}' title changed ('{existing.Value.Title}' -> '{title}')");
+    }
+
+    static string OneLine(string s) => (s ?? "").Replace("\r", " ").Replace("\n", " ").Trim();
+    string fence = (code ?? "").Contains("```") ? "````" : "```";
+    StringBuilder md = new();
+    md.AppendLine("---");
+    md.AppendLine($"title: {OneLine(title)}");
+    md.AppendLine($"tags: {string.Join(", ", (tags ?? new List<string>()).Select(OneLine))}");
+    md.AppendLine($"created: {created}");
+    md.AppendLine($"updated: {now}");
+    md.AppendLine($"source: {source}");
+    md.AppendLine("---");
+    md.AppendLine();
+    md.AppendLine(fence + "csharp");
+    md.AppendLine((code ?? "").TrimEnd());
+    md.AppendLine(fence);
+    if (!string.IsNullOrWhiteSpace(comment))
+    {
+        md.AppendLine();
+        md.AppendLine(comment.Trim());
+    }
+    if (!string.IsNullOrWhiteSpace(resultSnippet))
+    {
+        string snippet = resultSnippet.Replace("-->", "-- >");
+        if (snippet.Length > 500)
+            snippet = snippet.Substring(0, 500) + "...";
+        md.AppendLine();
+        md.AppendLine($"<!-- last-result: {snippet} -->");
+    }
+    lock (skillWriteLock)
+        File.WriteAllText(path, md.ToString());
+    Console.WriteLine($"uch-mcp-proxy: {(updated ? "updated" : "saved")} skill '{slug}' ({source})");
+    return (slug, updated);
+}
+
+// Tolerant of hand-edited files: missing frontmatter -> title falls back to the slug,
+// missing fence -> no code. Returns null only when the file is unreadable.
+(string Title, List<string> Tags, string Created, string Code, string Comment)? ParseSkillFile(string path)
+{
+    try
+    {
+        string[] lines = File.ReadAllLines(path);
+        string title = Path.GetFileNameWithoutExtension(path);
+        List<string> tags = new();
+        string created = null;
+        int i = 0;
+        while (i < lines.Length && lines[i].Trim().Length == 0)
+            i++;
+        if (i < lines.Length && lines[i].Trim() == "---")
+        {
+            i++;
+            for (; i < lines.Length && lines[i].Trim() != "---"; i++)
+            {
+                int colon = lines[i].IndexOf(':');
+                if (colon < 0)
+                    continue;
+                string key = lines[i].Substring(0, colon).Trim().ToLowerInvariant();
+                string value = lines[i].Substring(colon + 1).Trim();
+                switch (key)
+                {
+                    case "title": if (value.Length > 0) title = value; break;
+                    case "tags": tags = value.Split(',').Select(t => t.Trim()).Where(t => t.Length > 0).ToList(); break;
+                    case "created": created = value; break;
+                }
+            }
+            if (i < lines.Length)
+                i++; // skip closing ---
+        }
+
+        string code = null;
+        int bodyStart = i;
+        int fenceStart = -1;
+        for (int j = i; j < lines.Length; j++)
+            if (lines[j].TrimStart().StartsWith("```")) { fenceStart = j; break; }
+        if (fenceStart >= 0)
+        {
+            int fenceLen = lines[fenceStart].Trim().TakeWhile(c => c == '`').Count();
+            List<string> codeLines = new();
+            int j = fenceStart + 1;
+            for (; j < lines.Length; j++)
+            {
+                string t = lines[j].Trim();
+                if (t.Length >= fenceLen && t.All(c => c == '`'))
+                    break;
+                codeLines.Add(lines[j]);
+            }
+            code = string.Join("\n", codeLines);
+            bodyStart = j + 1;
+        }
+
+        string comment = string.Join("\n", lines.Skip(bodyStart));
+        int marker = comment.IndexOf("<!-- last-result:", StringComparison.Ordinal);
+        if (marker >= 0)
+            comment = comment.Substring(0, marker);
+        return (title, tags, created, code, comment.Trim());
+    }
+    catch { return null; }
+}
+
+// A future search_skills is just this plus full-text filtering over ParseSkillFile output.
+List<(string Slug, string Title, List<string> Tags, string Summary)> ListSkills()
+{
+    List<(string, string, List<string>, string)> skills = new();
+    try
+    {
+        if (!Directory.Exists(skillsDir))
+            return skills;
+        foreach (string path in Directory.GetFiles(skillsDir, "*.md").OrderBy(p => p))
+        {
+            (string Title, List<string> Tags, string Created, string Code, string Comment)? parsed = ParseSkillFile(path);
+            if (parsed == null)
+            {
+                Console.WriteLine($"uch-mcp-proxy: unreadable skill file skipped: {path}");
+                continue;
+            }
+            string summary = parsed.Value.Comment?.Split('\n').FirstOrDefault(l => l.Trim().Length > 0)?.Trim() ?? "";
+            skills.Add((Path.GetFileNameWithoutExtension(path), parsed.Value.Title, parsed.Value.Tags, summary));
+        }
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"uch-mcp-proxy: list skills failed: {ex.Message}");
+    }
+    return skills;
+}
+
+// Every failed execute_csharp run gets a JSONL record — first-party data for
+// "what C# do agents commonly get wrong" analysis (the alternative is mining transcripts).
+void LogCsharpFailure(int port, string code, string error)
+{
+    try
+    {
+        string line = new JsonObject
+        {
+            ["ts"] = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ"),
+            ["port"] = port,
+            ["code"] = code,
+            ["error"] = error,
+        }.ToJsonString();
+        lock (skillWriteLock)
+            File.AppendAllText(failuresLogPath, line + Environment.NewLine);
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"uch-mcp-proxy: failure-log write failed: {ex.Message}");
+    }
+}
+
+// Like TryForwardAsync but returns the body instead of streaming it to the client,
+// so the caller can inspect the outcome first. Null = instance gone.
+async Task<string> ForwardForBodyAsync(int port, string body)
+{
+    try
+    {
+        using HttpResponseMessage upstream = await http.PostAsync($"http://127.0.0.1:{port}/mcp",
+            new StringContent(body, Encoding.UTF8, "application/json"));
+        return await upstream.Content.ReadAsStringAsync();
+    }
+    catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+    {
+        return null;
+    }
+}
+
+// Digs the { ok, result, error } payload out of an execute_csharp JSON-RPC response.
+// Returns false when success can't be confirmed (error envelope, isError, unparseable text).
+static bool TryExtractExecOutcome(string respBody, out bool ok, out string snippet)
+{
+    ok = false;
+    snippet = null;
+    try
+    {
+        JsonNode resp = JsonNode.Parse(respBody);
+        if (resp?["error"] != null)
+            return false;
+        // Don't bail on result.isError: the bridge sets it whenever ok:false, and the
+        // inner payload still carries the error text we want for the failure log.
+        JsonNode result = resp?["result"];
+        string text = (result?["content"] as JsonArray)?.OfType<JsonObject>()
+            .FirstOrDefault(c => c["type"]?.GetValue<string>() == "text")?["text"]?.GetValue<string>();
+        if (text == null)
+            return false;
+        JsonNode inner = JsonNode.Parse(text);
+        ok = inner?["ok"]?.GetValue<bool>() == true;
+        JsonNode payload = inner?["result"] ?? inner?["error"];
+        snippet = payload is JsonValue v && v.TryGetValue(out string s) ? s : payload?.ToJsonString();
+        return true;
+    }
+    catch { return false; }
+}
+
+static string AppendTextBlock(string respBody, string text)
+{
+    try
+    {
+        JsonNode resp = JsonNode.Parse(respBody);
+        if (resp?["result"]?["content"] is not JsonArray content)
+            return respBody;
+        content.Add(new JsonObject { ["type"] = "text", ["text"] = text });
+        return resp.ToJsonString();
+    }
+    catch { return respBody; }
+}
+
+// Defensive arg readers: clients occasionally send the wrong JSON type; treat as absent.
+static string ReadStringArg(JsonObject args, string key)
+{
+    try { return args[key]?.GetValue<string>(); } catch { return null; }
+}
+
+static List<string> ReadStringArrayArg(JsonObject args, string key)
+{
+    List<string> values = new();
+    if (args[key] is JsonArray arr)
+        foreach (JsonNode node in arr)
+        {
+            try
+            {
+                string s = node?.GetValue<string>();
+                if (!string.IsNullOrWhiteSpace(s))
+                    values.Add(s);
+            }
+            catch { }
+        }
+    return values;
 }
 
 static JsonObject ProxyTool(string name, string description, JsonObject properties)

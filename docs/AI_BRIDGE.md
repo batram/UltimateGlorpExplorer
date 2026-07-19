@@ -35,7 +35,8 @@ port: `curl http://127.0.0.1:7311/` lists endpoints, `/docs` the full reference.
 Agent (MCP or curl)
    │
    ├── mcp-proxy  :7310   always-on; hides game downtime, launches/kills the game,
-   │        │             routes _port to instances, serves postmortem from disk
+   │        │             routes _port to instances, serves postmortem from disk,
+   │        │             stores the skill library (reusable C# snippets)
    │        ▼
    └── AIBridgeServer  :7311, 7313, 7314, ...   (one per game instance, first free port)
             │  HttpListener bg thread → MainThreadDispatcher (drained each frame)
@@ -71,16 +72,43 @@ Config: "AI Bridge Port" in `BepInEx\config\com.sinai.unityexplorer.cfg` (0 disa
 | `export_sprites` | `GET /sprites?texture_id` | Sprite-sheet manifest: name, rect (+ PNG-space rect), pivot, PPU, border |
 | `get_logs` | `GET /logs?since` | Log tail with cursor + utc timestamps |
 | *proxy:* `list_instances`, `launch_game`, `kill_game`, `postmortem` | — | Lifecycle & crash forensics, work with zero instances |
+| *proxy:* `save_skill`, `list_skills`, `get_skill` | — | Skill library: persistent, reusable C# snippets |
 
 `launch_game` sanity-checks the mod setup before starting: it refuses to launch if the
 BepInEx doorstop (`winhttp.dll`) is missing/disabled, the UnityExplorer DLL is absent from
 `BepInEx\plugins`, or the AI bridge port is set to 0 in the config — and it warns (but still
 launches) when the deployed DLL is older than the repo's last build, i.e. you forgot to redeploy.
-Its optional `args` string array is passed unchanged to every launched game process; arguments
-containing spaces do not need manual quoting. For example:
-`launch_game {count: 1, args: ["-screen-width", "1280", "-screen-height", "720"]}`.
+Its optional `game_args` string array is passed unchanged to every launched game process;
+arguments containing spaces do not need manual quoting. For example:
+`launch_game {count: 1, game_args: ["-screen-width", "1280", "-screen-height", "720"]}`.
+(The legacy key `args` is still accepted; it was renamed because PowerShell wrappers kept
+colliding with the automatic `$args` variable.)
 One call can launch up to 32 instances. Their bridges use the first free ports in
 `[7311, 7343)`; use `list_instances` to discover the actual port-to-process mapping.
+
+## Skill library
+
+The proxy keeps a persistent library of reusable C# snippets so agents don't rewrite the
+same code every session. Skills are stored as one human-readable markdown file each
+(frontmatter with title/tags/timestamps, a fenced `csharp` block, free-form usage notes)
+in `skills/` next to the proxy exe — hand-editable, greppable, diffable.
+
+Two ways to save:
+
+- Pass `title` (plus optional `tags`, `comment`) to `execute_csharp`. The proxy strips
+  those fields before forwarding, and saves the code only if the run returned `ok:true`
+  (a truncated result snippet is stored alongside).
+- Call `save_skill {title, code, tags?, comment?}` to save without executing — e.g. a
+  polished version after iterating, or a `wait_for`/observer expression worth keeping.
+
+Retrieval: `list_skills` returns slug/title/tags/one-line summary; `get_skill {name}`
+(slug or title) returns the full markdown. Saving the same title again overwrites the
+skill, preserving its `created` timestamp. Prefer saving parameterizable,
+scene-independent code so skills stay reusable.
+
+The proxy also appends every failed `execute_csharp` run (`{ts, port, code, error}`) to
+`csharp-failures.jsonl` next to the exe — first-party data for analyzing what C# agents
+commonly get wrong.
 
 ## Worked examples
 
