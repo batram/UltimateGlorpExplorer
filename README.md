@@ -15,6 +15,11 @@
 
 ## What's different in this fork
 
+
+<div align="center">
+  <video src="https://github.com/user-attachments/assets/335ff04a-ca59-466b-8bd7-851978c015e6" />
+</div>
+    
 An **AI bridge** embedded in the game, plus **MCP (Modded Chicken Protocol)** — coincidentally
 wire-compatible with Anthropic's [Model Context Protocol](https://modelcontextprotocol.io) — so
 Claude Code, Codex & friends can use the running game as a tool server:
